@@ -10,9 +10,8 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.action.ActionType;
-import org.elasticsearch.action.admin.cluster.snapshots.delete.DeleteSnapshotAction;
 import org.elasticsearch.action.admin.cluster.snapshots.delete.DeleteSnapshotRequest;
-import org.elasticsearch.action.support.PlainActionFuture;
+import org.elasticsearch.action.admin.cluster.snapshots.delete.TransportDeleteSnapshotAction;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.metadata.LifecycleExecutionState;
@@ -58,19 +57,18 @@ public class CleanupSnapshotStepTests extends AbstractStepTestCase<CleanupSnapsh
         String policyName = "test-ilm-policy";
 
         {
-            IndexMetadata.Builder indexMetadataBuilder = IndexMetadata.builder(indexName)
+            final var indexMetadata = IndexMetadata.builder(indexName)
                 .settings(settings(IndexVersion.current()).put(LifecycleSettings.LIFECYCLE_NAME, policyName))
                 .numberOfShards(randomIntBetween(1, 5))
-                .numberOfReplicas(randomIntBetween(0, 5));
-
-            IndexMetadata indexMetadata = indexMetadataBuilder.build();
-
-            ClusterState clusterState = ClusterState.builder(emptyClusterState())
-                .metadata(Metadata.builder().put(indexMetadata, true).build())
+                .numberOfReplicas(randomIntBetween(0, 5))
                 .build();
 
-            CleanupSnapshotStep cleanupSnapshotStep = createRandomInstance();
-            PlainActionFuture.<Void, Exception>get(f -> cleanupSnapshotStep.performAction(indexMetadata, clusterState, null, f));
+            performActionAndWait(
+                createRandomInstance(),
+                indexMetadata,
+                ClusterState.builder(emptyClusterState()).metadata(Metadata.builder().put(indexMetadata, true).build()).build(),
+                null
+            );
         }
 
         {
@@ -83,12 +81,12 @@ public class CleanupSnapshotStepTests extends AbstractStepTestCase<CleanupSnapsh
 
             IndexMetadata indexMetadata = indexMetadataBuilder.build();
 
-            ClusterState clusterState = ClusterState.builder(emptyClusterState())
-                .metadata(Metadata.builder().put(indexMetadata, true).build())
-                .build();
-
-            CleanupSnapshotStep cleanupSnapshotStep = createRandomInstance();
-            PlainActionFuture.<Void, Exception>get(f -> cleanupSnapshotStep.performAction(indexMetadata, clusterState, null, f));
+            performActionAndWait(
+                createRandomInstance(),
+                indexMetadata,
+                ClusterState.builder(emptyClusterState()).metadata(Metadata.builder().put(indexMetadata, true).build()).build(),
+                null
+            );
         }
     }
 
@@ -124,7 +122,7 @@ public class CleanupSnapshotStepTests extends AbstractStepTestCase<CleanupSnapsh
                 Request request,
                 ActionListener<Response> listener
             ) {
-                assertThat(action.name(), is(DeleteSnapshotAction.NAME));
+                assertThat(action.name(), is(TransportDeleteSnapshotAction.TYPE.name()));
                 assertTrue(request instanceof DeleteSnapshotRequest);
                 assertThat(((DeleteSnapshotRequest) request).snapshots(), arrayContaining(expectedSnapshotName));
             }

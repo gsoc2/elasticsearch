@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.bulk;
@@ -61,6 +62,7 @@ public final class BulkRequestParser {
     private static final ParseField IF_SEQ_NO = new ParseField("if_seq_no");
     private static final ParseField IF_PRIMARY_TERM = new ParseField("if_primary_term");
     private static final ParseField REQUIRE_ALIAS = new ParseField(DocWriteRequest.REQUIRE_ALIAS);
+    private static final ParseField REQUIRE_DATA_STREAM = new ParseField(DocWriteRequest.REQUIRE_DATA_STREAM);
     private static final ParseField LIST_EXECUTED_PIPELINES = new ParseField(DocWriteRequest.LIST_EXECUTED_PIPELINES);
     private static final ParseField DYNAMIC_TEMPLATES = new ParseField("dynamic_templates");
 
@@ -84,13 +86,13 @@ public final class BulkRequestParser {
             .withRestApiVersion(restApiVersion);
     }
 
-    private static int findNextMarker(byte marker, int from, BytesReference data) {
+    private static int findNextMarker(byte marker, int from, BytesReference data, boolean isIncremental) {
         final int res = data.indexOf(marker, from);
         if (res != -1) {
             assert res >= 0;
             return res;
         }
-        if (from != data.length()) {
+        if (from != data.length() && isIncremental == false) {
             throw new IllegalArgumentException("The bulk request must be terminated by a newline [\\n]");
         }
         return res;
@@ -127,6 +129,7 @@ public final class BulkRequestParser {
         @Nullable FetchSourceContext defaultFetchSourceContext,
         @Nullable String defaultPipeline,
         @Nullable Boolean defaultRequireAlias,
+        @Nullable Boolean defaultRequireDataStream,
         @Nullable Boolean defaultListExecutedPipelines,
         boolean allowExplicitIndex,
         XContentType xContentType,
@@ -134,18 +137,57 @@ public final class BulkRequestParser {
         Consumer<UpdateRequest> updateRequestConsumer,
         Consumer<DeleteRequest> deleteRequestConsumer
     ) throws IOException {
-        XContent xContent = xContentType.xContent();
-        int line = 0;
-        int from = 0;
-        byte marker = xContent.streamSeparator();
         // Bulk requests can contain a lot of repeated strings for the index, pipeline and routing parameters. This map is used to
         // deduplicate duplicate strings parsed for these parameters. While it does not prevent instantiating the duplicate strings, it
         // reduces their lifetime to the lifetime of this parse call instead of the lifetime of the full bulk request.
         final Map<String, String> stringDeduplicator = new HashMap<>();
+
+        incrementalParse(
+            data,
+            defaultIndex,
+            defaultRouting,
+            defaultFetchSourceContext,
+            defaultPipeline,
+            defaultRequireAlias,
+            defaultRequireDataStream,
+            defaultListExecutedPipelines,
+            allowExplicitIndex,
+            xContentType,
+            indexRequestConsumer,
+            updateRequestConsumer,
+            deleteRequestConsumer,
+            false,
+            stringDeduplicator
+        );
+    }
+
+    public int incrementalParse(
+        BytesReference data,
+        String defaultIndex,
+        String defaultRouting,
+        FetchSourceContext defaultFetchSourceContext,
+        String defaultPipeline,
+        Boolean defaultRequireAlias,
+        Boolean defaultRequireDataStream,
+        Boolean defaultListExecutedPipelines,
+        boolean allowExplicitIndex,
+        XContentType xContentType,
+        BiConsumer<IndexRequest, String> indexRequestConsumer,
+        Consumer<UpdateRequest> updateRequestConsumer,
+        Consumer<DeleteRequest> deleteRequestConsumer,
+        boolean isIncremental,
+        Map<String, String> stringDeduplicator
+    ) throws IOException {
+        XContent xContent = xContentType.xContent();
+        byte marker = xContent.bulkSeparator();
         boolean typesDeprecationLogged = false;
 
+        int line = 0;
+        int from = 0;
+        int consumed = 0;
+
         while (true) {
-            int nextMarker = findNextMarker(marker, from, data);
+            int nextMarker = findNextMarker(marker, from, data, isIncremental);
             if (nextMarker == -1) {
                 break;
             }
@@ -209,6 +251,7 @@ public final class BulkRequestParser {
                 int retryOnConflict = 0;
                 String pipeline = defaultPipeline;
                 boolean requireAlias = defaultRequireAlias != null && defaultRequireAlias;
+                boolean requireDataStream = defaultRequireDataStream != null && defaultRequireDataStream;
                 boolean listExecutedPipelines = defaultListExecutedPipelines != null && defaultListExecutedPipelines;
                 Map<String, String> dynamicTemplates = Map.of();
 
@@ -263,6 +306,8 @@ public final class BulkRequestParser {
                                 fetchSourceContext = FetchSourceContext.fromXContent(parser);
                             } else if (REQUIRE_ALIAS.match(currentFieldName, parser.getDeprecationHandler())) {
                                 requireAlias = parser.booleanValue();
+                            } else if (REQUIRE_DATA_STREAM.match(currentFieldName, parser.getDeprecationHandler())) {
+                                requireDataStream = parser.booleanValue();
                             } else if (LIST_EXECUTED_PIPELINES.match(currentFieldName, parser.getDeprecationHandler())) {
                                 listExecutedPipelines = parser.booleanValue();
                             } else {
@@ -327,8 +372,9 @@ public final class BulkRequestParser {
                             .setIfSeqNo(ifSeqNo)
                             .setIfPrimaryTerm(ifPrimaryTerm)
                     );
+                    consumed = from;
                 } else {
-                    nextMarker = findNextMarker(marker, from, data);
+                    nextMarker = findNextMarker(marker, from, data, isIncremental);
                     if (nextMarker == -1) {
                         break;
                     }
@@ -336,59 +382,35 @@ public final class BulkRequestParser {
 
                     // we use internalAdd so we don't fork here, this allows us not to copy over the big byte array to small chunks
                     // of index request.
-                    if ("index".equals(action)) {
-                        if (opType == null) {
-                            indexRequestConsumer.accept(
-                                new IndexRequest(index).id(id)
-                                    .routing(routing)
-                                    .version(version)
-                                    .versionType(versionType)
-                                    .setPipeline(pipeline)
-                                    .setIfSeqNo(ifSeqNo)
-                                    .setIfPrimaryTerm(ifPrimaryTerm)
-                                    .source(sliceTrimmingCarriageReturn(data, from, nextMarker, xContentType), xContentType)
-                                    .setDynamicTemplates(dynamicTemplates)
-                                    .setRequireAlias(requireAlias)
-                                    .setListExecutedPipelines(listExecutedPipelines),
-                                type
-                            );
-                        } else {
-                            indexRequestConsumer.accept(
-                                new IndexRequest(index).id(id)
-                                    .routing(routing)
-                                    .version(version)
-                                    .versionType(versionType)
-                                    .create("create".equals(opType))
-                                    .setPipeline(pipeline)
-                                    .setIfSeqNo(ifSeqNo)
-                                    .setIfPrimaryTerm(ifPrimaryTerm)
-                                    .source(sliceTrimmingCarriageReturn(data, from, nextMarker, xContentType), xContentType)
-                                    .setDynamicTemplates(dynamicTemplates)
-                                    .setRequireAlias(requireAlias)
-                                    .setListExecutedPipelines(listExecutedPipelines),
-                                type
-                            );
+                    if ("index".equals(action) || "create".equals(action)) {
+                        var indexRequest = new IndexRequest(index).id(id)
+                            .routing(routing)
+                            .version(version)
+                            .versionType(versionType)
+                            .setPipeline(pipeline)
+                            .setIfSeqNo(ifSeqNo)
+                            .setIfPrimaryTerm(ifPrimaryTerm)
+                            .source(sliceTrimmingCarriageReturn(data, from, nextMarker, xContentType), xContentType)
+                            .setDynamicTemplates(dynamicTemplates)
+                            .setRequireAlias(requireAlias)
+                            .setRequireDataStream(requireDataStream)
+                            .setListExecutedPipelines(listExecutedPipelines);
+                        if ("create".equals(action)) {
+                            indexRequest = indexRequest.create(true);
+                        } else if (opType != null) {
+                            indexRequest = indexRequest.create("create".equals(opType));
                         }
-                    } else if ("create".equals(action)) {
-                        indexRequestConsumer.accept(
-                            new IndexRequest(index).id(id)
-                                .routing(routing)
-                                .version(version)
-                                .versionType(versionType)
-                                .create(true)
-                                .setPipeline(pipeline)
-                                .setIfSeqNo(ifSeqNo)
-                                .setIfPrimaryTerm(ifPrimaryTerm)
-                                .source(sliceTrimmingCarriageReturn(data, from, nextMarker, xContentType), xContentType)
-                                .setDynamicTemplates(dynamicTemplates)
-                                .setRequireAlias(requireAlias)
-                                .setListExecutedPipelines(listExecutedPipelines),
-                            type
-                        );
+                        indexRequestConsumer.accept(indexRequest, type);
                     } else if ("update".equals(action)) {
                         if (version != Versions.MATCH_ANY || versionType != VersionType.INTERNAL) {
                             throw new IllegalArgumentException(
                                 "Update requests do not support versioning. " + "Please use `if_seq_no` and `if_primary_term` instead"
+                            );
+                        }
+                        if (requireDataStream) {
+                            throw new IllegalArgumentException(
+                                "Update requests do not support the `require_data_stream` flag, "
+                                    + "as data streams do not support update operations"
                             );
                         }
                         // TODO: support dynamic_templates in update requests
@@ -425,12 +447,14 @@ public final class BulkRequestParser {
                     }
                     // move pointers
                     from = nextMarker + 1;
+                    consumed = from;
                 }
             }
         }
+        return isIncremental ? consumed : from;
     }
 
-    @UpdateForV9
+    @UpdateForV9(owner = UpdateForV9.Owner.DISTRIBUTED_INDEXING)
     // Warnings will need to be replaced with XContentEOFException from 9.x
     private static void warnBulkActionNotProperlyClosed(String message) {
         deprecationLogger.compatibleCritical(STRICT_ACTION_PARSING_WARNING_KEY, message);

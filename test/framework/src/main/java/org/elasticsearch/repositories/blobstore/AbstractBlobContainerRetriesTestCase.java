@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.repositories.blobstore;
@@ -14,6 +15,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.apache.http.ConnectionClosedException;
 import org.apache.http.HttpStatus;
 import org.elasticsearch.common.blobstore.BlobContainer;
+import org.elasticsearch.common.blobstore.OperationPurpose;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.Streams;
 import org.elasticsearch.common.unit.ByteSizeValue;
@@ -42,6 +44,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.elasticsearch.repositories.blobstore.BlobStoreTestUtil.randomPurpose;
+import static org.elasticsearch.test.NeverMatcher.never;
+import static org.hamcrest.Matchers.anyOf;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.either;
 import static org.hamcrest.Matchers.equalTo;
@@ -146,7 +150,7 @@ public abstract class AbstractBlobContainerRetriesTestCase extends ESTestCase {
             }
         });
 
-        try (InputStream inputStream = blobContainer.readBlob(randomPurpose(), "read_blob_max_retries")) {
+        try (InputStream inputStream = blobContainer.readBlob(randomRetryingPurpose(), "read_blob_max_retries")) {
             final int readLimit;
             final InputStream wrappedStream;
             if (randomBoolean()) {
@@ -212,7 +216,7 @@ public abstract class AbstractBlobContainerRetriesTestCase extends ESTestCase {
 
         final int position = randomIntBetween(0, bytes.length - 1);
         final int length = randomIntBetween(0, randomBoolean() ? bytes.length : Integer.MAX_VALUE);
-        try (InputStream inputStream = blobContainer.readBlob(randomPurpose(), "read_range_blob_max_retries", position, length)) {
+        try (InputStream inputStream = blobContainer.readBlob(randomRetryingPurpose(), "read_range_blob_max_retries", position, length)) {
             final int readLimit;
             final InputStream wrappedStream;
             if (randomBoolean()) {
@@ -252,7 +256,7 @@ public abstract class AbstractBlobContainerRetriesTestCase extends ESTestCase {
 
         Exception exception = expectThrows(
             unresponsiveExceptionType(),
-            () -> Streams.readFully(blobContainer.readBlob(randomPurpose(), "read_blob_unresponsive"))
+            () -> Streams.readFully(blobContainer.readBlob(randomFiniteRetryingPurpose(), "read_blob_unresponsive"))
         );
         assertThat(exception.getMessage().toLowerCase(Locale.ROOT), containsString("read timed out"));
         assertThat(exception.getCause(), instanceOf(SocketTimeoutException.class));
@@ -269,8 +273,8 @@ public abstract class AbstractBlobContainerRetriesTestCase extends ESTestCase {
         exception = expectThrows(Exception.class, () -> {
             try (
                 InputStream stream = randomBoolean()
-                    ? blobContainer.readBlob(randomPurpose(), "read_blob_incomplete")
-                    : blobContainer.readBlob(randomPurpose(), "read_blob_incomplete", position, length)
+                    ? blobContainer.readBlob(randomFiniteRetryingPurpose(), "read_blob_incomplete")
+                    : blobContainer.readBlob(randomFiniteRetryingPurpose(), "read_blob_incomplete", position, length)
             ) {
                 Streams.readFully(stream);
             }
@@ -278,15 +282,26 @@ public abstract class AbstractBlobContainerRetriesTestCase extends ESTestCase {
         assertThat(exception, readTimeoutExceptionMatcher());
         assertThat(
             exception.getMessage().toLowerCase(Locale.ROOT),
-            either(containsString("read timed out")).or(containsString("premature end of chunk coded message body: closing chunk expected"))
-                .or(containsString("Read timed out"))
-                .or(containsString("unexpected end of file from server"))
+            anyOf(
+                containsString("read timed out"),
+                containsString("premature end of chunk coded message body: closing chunk expected"),
+                containsString("Read timed out"),
+                containsString("unexpected end of file from server")
+            )
         );
         assertThat(exception.getSuppressed().length, getMaxRetriesMatcher(maxRetries));
     }
 
     protected org.hamcrest.Matcher<Integer> getMaxRetriesMatcher(int maxRetries) {
         return equalTo(maxRetries);
+    }
+
+    protected OperationPurpose randomRetryingPurpose() {
+        return randomPurpose();
+    }
+
+    protected OperationPurpose randomFiniteRetryingPurpose() {
+        return randomPurpose();
     }
 
     public void testReadBlobWithNoHttpResponse() {
@@ -298,9 +313,9 @@ public abstract class AbstractBlobContainerRetriesTestCase extends ESTestCase {
 
         Exception exception = expectThrows(unresponsiveExceptionType(), () -> {
             if (randomBoolean()) {
-                Streams.readFully(blobContainer.readBlob(randomPurpose(), "read_blob_no_response"));
+                Streams.readFully(blobContainer.readBlob(randomFiniteRetryingPurpose(), "read_blob_no_response"));
             } else {
-                Streams.readFully(blobContainer.readBlob(randomPurpose(), "read_blob_no_response", 0, 1));
+                Streams.readFully(blobContainer.readBlob(randomFiniteRetryingPurpose(), "read_blob_no_response", 0, 1));
             }
         });
         assertThat(
@@ -313,27 +328,37 @@ public abstract class AbstractBlobContainerRetriesTestCase extends ESTestCase {
         final int maxRetries = randomInt(20);
         final BlobContainer blobContainer = createBlobContainer(maxRetries, null, null, null);
 
+        final boolean alwaysFlushBody = randomBoolean();
+
         // HTTP server sends a partial response
         final byte[] bytes = randomBlobContent(1);
         httpServer.createContext(downloadStorageEndpoint(blobContainer, "read_blob_incomplete"), exchange -> {
             sendIncompleteContent(exchange, bytes);
+            if (alwaysFlushBody) {
+                exchange.getResponseBody().flush();
+            }
             exchange.close();
         });
 
         final Exception exception = expectThrows(Exception.class, () -> {
             try (
                 InputStream stream = randomBoolean()
-                    ? blobContainer.readBlob(randomPurpose(), "read_blob_incomplete", 0, 1)
-                    : blobContainer.readBlob(randomPurpose(), "read_blob_incomplete")
+                    ? blobContainer.readBlob(randomFiniteRetryingPurpose(), "read_blob_incomplete", 0, 1)
+                    : blobContainer.readBlob(randomFiniteRetryingPurpose(), "read_blob_incomplete")
             ) {
                 Streams.readFully(stream);
             }
         });
         assertThat(
             exception.getMessage().toLowerCase(Locale.ROOT),
-            either(containsString("premature end of chunk coded message body: closing chunk expected")).or(
-                containsString("premature end of content-length delimited message body")
-            ).or(containsString("connection closed prematurely"))
+            anyOf(
+                // closing the connection after sending the headers and some incomplete body might yield one of these:
+                containsString("premature end of chunk coded message body: closing chunk expected"),
+                containsString("premature end of content-length delimited message body"),
+                containsString("connection closed prematurely"),
+                // if we didn't call exchange.getResponseBody().flush() then we might not even have sent the response headers:
+                alwaysFlushBody ? never() : containsString("the target server failed to respond")
+            )
         );
         assertThat(exception.getSuppressed().length, getMaxRetriesMatcher(Math.min(10, maxRetries)));
     }

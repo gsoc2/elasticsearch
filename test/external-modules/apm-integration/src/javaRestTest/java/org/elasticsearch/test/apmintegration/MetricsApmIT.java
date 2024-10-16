@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.test.apmintegration;
@@ -16,7 +17,6 @@ import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xcontent.spi.XContentProvider;
 import org.hamcrest.Matcher;
-import org.hamcrest.Matchers;
 import org.hamcrest.StringDescription;
 import org.junit.ClassRule;
 import org.junit.Rule;
@@ -47,8 +47,8 @@ public class MetricsApmIT extends ESRestTestCase {
         .module("test-apm-integration")
         .module("apm")
         .setting("telemetry.metrics.enabled", "true")
-        .setting("tracing.apm.agent.metrics_interval", "1s")
-        .setting("tracing.apm.agent.server_url", "http://127.0.0.1:" + mockApmServer.getPort())
+        .setting("telemetry.agent.metrics_interval", "1s")
+        .setting("telemetry.agent.server_url", "http://127.0.0.1:" + mockApmServer.getPort())
         .build();
 
     @Override
@@ -60,19 +60,19 @@ public class MetricsApmIT extends ESRestTestCase {
     public void testApmIntegration() throws Exception {
         Map<String, Predicate<Map<String, Object>>> sampleAssertions = new HashMap<>(
             Map.ofEntries(
-                assertion(TestMeterUsages.VERY_LONG_NAME, m -> (Double) m.get("value"), closeTo(1.0, 0.001)),
-                assertion("testLongCounter", m -> (Double) m.get("value"), closeTo(1.0, 0.001)),
-                assertion("testAsyncDoubleCounter", m -> (Double) m.get("value"), closeTo(1.0, 0.001)),
-                assertion("testAsyncLongCounter", m -> (Integer) m.get("value"), equalTo(1)),
-                assertion("testDoubleGauge", m -> (Double) m.get("value"), closeTo(1.0, 0.001)),
-                assertion("testLongGauge", m -> (Integer) m.get("value"), equalTo(1)),
+                assertion("es.test.long_counter.total", m -> (Double) m.get("value"), closeTo(1.0, 0.001)),
+                assertion("es.test.double_counter.total", m -> (Double) m.get("value"), closeTo(1.0, 0.001)),
+                assertion("es.test.async_double_counter.total", m -> (Double) m.get("value"), closeTo(1.0, 0.001)),
+                assertion("es.test.async_long_counter.total", m -> (Integer) m.get("value"), equalTo(1)),
+                assertion("es.test.double_gauge.current", m -> (Double) m.get("value"), closeTo(1.0, 0.001)),
+                assertion("es.test.long_gauge.current", m -> (Integer) m.get("value"), equalTo(1)),
                 assertion(
-                    "testDoubleHistogram",
+                    "es.test.double_histogram.histogram",
                     m -> ((Collection<Integer>) m.get("counts")).stream().mapToInt(Integer::intValue).sum(),
                     equalTo(2)
                 ),
                 assertion(
-                    "testLongHistogram",
+                    "es.test.long_histogram.histogram",
                     m -> ((Collection<Integer>) m.get("counts")).stream().mapToInt(Integer::intValue).sum(),
                     equalTo(2)
                 )
@@ -90,10 +90,17 @@ public class MetricsApmIT extends ESRestTestCase {
                 var metricset = (Map<String, Object>) apmMessage.get("metricset");
                 var samples = (Map<String, Object>) metricset.get("samples");
 
-                samples.entrySet().forEach(sampleEntry -> {
-                    var assertion = sampleAssertions.get(sampleEntry.getKey());// sample name
-                    if (assertion != null && assertion.test((Map<String, Object>) sampleEntry.getValue())) {// sample object
-                        sampleAssertions.remove(sampleEntry.getKey());
+                samples.forEach((key, value) -> {
+                    var assertion = sampleAssertions.get(key);// sample name
+                    if (assertion != null) {
+                        logger.info("Matched {}", key);
+                        var sampleObject = (Map<String, Object>) value;
+                        if (assertion.test(sampleObject)) {// sample object
+                            logger.info("{} assertion PASSED", key);
+                            sampleAssertions.remove(key);
+                        } else {
+                            logger.error("{} assertion FAILED: {}", key, sampleObject.get("value"));
+                        }
                     }
                 });
             }
@@ -107,8 +114,8 @@ public class MetricsApmIT extends ESRestTestCase {
 
         client().performRequest(new Request("GET", "/_use_apm_metrics"));
 
-        finished.await(30, TimeUnit.SECONDS);
-        assertThat(sampleAssertions, Matchers.anEmptyMap());
+        var completed = finished.await(30, TimeUnit.SECONDS);
+        assertTrue("Timeout when waiting for assertions to complete. Remaining assertions to match: " + sampleAssertions, completed);
     }
 
     private <T> Map.Entry<String, Predicate<Map<String, Object>>> assertion(

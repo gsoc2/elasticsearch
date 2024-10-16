@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.indices.recovery;
@@ -314,7 +315,9 @@ public class RecoverySourceHandler {
                 cancellableThreads,
                 ActionListener.wrap(ignored -> {
                     final long endingSeqNo = shard.seqNoStats().getMaxSeqNo();
-                    logger.trace("snapshot for recovery; current size is [{}]", estimateNumberOfHistoryOperations(startingSeqNo));
+                    if (logger.isTraceEnabled()) {
+                        logger.trace("snapshot for recovery; current size is [{}]", estimateNumberOfHistoryOperations(startingSeqNo));
+                    }
                     final Translog.Snapshot phase2Snapshot = shard.newChangesSnapshot(
                         "peer-recovery",
                         startingSeqNo,
@@ -565,19 +568,17 @@ public class RecoverySourceHandler {
                     // but we must still create a retention lease
                     .<RetentionLease>newForked(leaseListener -> createRetentionLease(startingSeqNo, leaseListener))
                     // and then compute the result of sending no files
-                    .<SendFileResult>andThen((l, ignored) -> {
+                    .andThenApply(ignored -> {
                         final TimeValue took = stopWatch.totalTime();
                         logger.trace("recovery [phase1]: took [{}]", took);
-                        l.onResponse(
-                            new SendFileResult(
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                0L,
-                                Collections.emptyList(),
-                                Collections.emptyList(),
-                                0L,
-                                took
-                            )
+                        return new SendFileResult(
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            0L,
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            0L,
+                            took
                         );
                     })
                     // and finally respond
@@ -702,7 +703,7 @@ public class RecoverySourceHandler {
                 .newForked(this::sendShardRecoveryPlanFileInfo)
                 // instruct the target to recover files from snapshot, possibly updating the plan on failure
                 .<List<StoreFileMetadata>>andThen(
-                    (l, ignored) -> recoverSnapshotFiles(shardRecoveryPlan, l.delegateResponse((recoverSnapshotFilesListener, e) -> {
+                    l -> recoverSnapshotFiles(shardRecoveryPlan, l.delegateResponse((recoverSnapshotFilesListener, e) -> {
                         if (shardRecoveryPlan.canRecoverSnapshotFilesFromSourceNode() == false
                             && e instanceof CancellableThreads.ExecutionCancelledException == false) {
                             shardRecoveryPlan = shardRecoveryPlan.getFallbackPlan();
@@ -733,10 +734,7 @@ public class RecoverySourceHandler {
                 })
                 // create a retention lease
                 .<RetentionLease>andThen(
-                    (createRetentionLeaseListener, ignored) -> createRetentionLease(
-                        shardRecoveryPlan.getStartingSeqNo(),
-                        createRetentionLeaseListener
-                    )
+                    createRetentionLeaseListener -> createRetentionLease(shardRecoveryPlan.getStartingSeqNo(), createRetentionLeaseListener)
                 )
                 // run cleanFiles, renaming temp files, removing surplus ones, creating an empty translog and so on
                 .<Void>andThen((finalRecoveryPlanListener, retentionLease) -> {
@@ -751,19 +749,17 @@ public class RecoverySourceHandler {
                     cleanFiles(store, recoverySourceMetadata, () -> translogOps, lastKnownGlobalCheckpoint, finalRecoveryPlanListener);
                 })
                 // compute the result
-                .<SendFileResult>andThen((resultListener, ignored) -> {
+                .andThenApply(ignored -> {
                     final TimeValue took = stopWatch.totalTime();
                     logger.trace("recovery [phase1]: took [{}]", took);
-                    resultListener.onResponse(
-                        new SendFileResult(
-                            shardRecoveryPlan.getFilesToRecoverNames(),
-                            shardRecoveryPlan.getFilesToRecoverSizes(),
-                            shardRecoveryPlan.getTotalSize(),
-                            shardRecoveryPlan.getFilesPresentInTargetNames(),
-                            shardRecoveryPlan.getFilesPresentInTargetSizes(),
-                            shardRecoveryPlan.getExistingSize(),
-                            took
-                        )
+                    return new SendFileResult(
+                        shardRecoveryPlan.getFilesToRecoverNames(),
+                        shardRecoveryPlan.getFilesToRecoverSizes(),
+                        shardRecoveryPlan.getTotalSize(),
+                        shardRecoveryPlan.getFilesPresentInTargetNames(),
+                        shardRecoveryPlan.getFilesPresentInTargetSizes(),
+                        shardRecoveryPlan.getExistingSize(),
+                        took
                     );
                 })
                 // and finally respond
@@ -1056,7 +1052,7 @@ public class RecoverySourceHandler {
         }
         SequenceNumbers.CommitInfo sourceSeqNos = SequenceNumbers.loadSeqNoInfoFromLuceneCommit(source.commitUserData().entrySet());
         SequenceNumbers.CommitInfo targetSeqNos = SequenceNumbers.loadSeqNoInfoFromLuceneCommit(target.commitUserData().entrySet());
-        if (sourceSeqNos.localCheckpoint != targetSeqNos.localCheckpoint || targetSeqNos.maxSeqNo != sourceSeqNos.maxSeqNo) {
+        if (sourceSeqNos.localCheckpoint() != targetSeqNos.localCheckpoint() || targetSeqNos.maxSeqNo() != sourceSeqNos.maxSeqNo()) {
             final String message = "try to recover "
                 + request.shardId()
                 + " with sync id but "
@@ -1291,7 +1287,12 @@ public class RecoverySourceHandler {
                 logger.trace("performing relocation hand-off");
                 cancellableThreads.execute(
                     // this acquires all IndexShard operation permits and will thus delay new recoveries until it is done
-                    () -> shard.relocated(request.targetAllocationId(), recoveryTarget::handoffPrimaryContext, finalStep)
+                    () -> shard.relocated(
+                        request.targetNode().getId(),
+                        request.targetAllocationId(),
+                        recoveryTarget::handoffPrimaryContext,
+                        finalStep
+                    )
                 );
                 /*
                  * if the recovery process fails after disabling primary mode on the source shard, both relocation source and
@@ -1375,7 +1376,7 @@ public class RecoverySourceHandler {
                         // we already have the file contents on heap no need to open the file again
                         currentInput = null;
                     } else {
-                        currentInput = store.directory().openInput(md.name(), IOContext.READONCE);
+                        currentInput = store.directory().openInput(md.name(), IOContext.READ);
                     }
                 }
 

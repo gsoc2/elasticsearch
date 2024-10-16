@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.snapshots;
@@ -37,7 +38,7 @@ public class RepositoryThrottlingStatsIT extends AbstractSnapshotIntegTestCase {
         IndexStats indexStats = indicesStats.getIndex("test-idx");
         long totalSizeInBytes = 0;
         for (ShardStats shard : indexStats.getShards()) {
-            totalSizeInBytes += shard.getStats().getStore().getSizeInBytes();
+            totalSizeInBytes += shard.getStats().getStore().sizeInBytes();
         }
         logger.info("--> total shards size: {} bytes", totalSizeInBytes);
 
@@ -57,11 +58,11 @@ public class RepositoryThrottlingStatsIT extends AbstractSnapshotIntegTestCase {
         createSnapshot("test-repo", "test-snap", Collections.singletonList("test-idx"));
 
         logger.info("--> restore from snapshot");
-        RestoreSnapshotResponse restoreSnapshotResponse = clusterAdmin().prepareRestoreSnapshot("test-repo", "test-snap")
-            .setRenamePattern("test-")
-            .setRenameReplacement("test2-")
-            .setWaitForCompletion(true)
-            .get();
+        RestoreSnapshotResponse restoreSnapshotResponse = clusterAdmin().prepareRestoreSnapshot(
+            TEST_REQUEST_TIMEOUT,
+            "test-repo",
+            "test-snap"
+        ).setRenamePattern("test-").setRenameReplacement("test2-").setWaitForCompletion(true).get();
         assertThat(restoreSnapshotResponse.getRestoreInfo().totalShards(), greaterThan(0));
         assertDocCount("test-idx", 100);
 

@@ -56,19 +56,45 @@ public final class SumDoubleAggregatorFunction implements AggregatorFunction {
   }
 
   @Override
-  public void addRawInput(Page page) {
+  public void addRawInput(Page page, BooleanVector mask) {
+    if (mask.allFalse()) {
+      // Entire page masked away
+      return;
+    }
+    if (mask.allTrue()) {
+      // No masking
+      DoubleBlock block = page.getBlock(channels.get(0));
+      DoubleVector vector = block.asVector();
+      if (vector != null) {
+        addRawVector(vector);
+      } else {
+        addRawBlock(block);
+      }
+      return;
+    }
+    // Some positions masked away, others kept
     DoubleBlock block = page.getBlock(channels.get(0));
     DoubleVector vector = block.asVector();
     if (vector != null) {
-      addRawVector(vector);
+      addRawVector(vector, mask);
     } else {
-      addRawBlock(block);
+      addRawBlock(block, mask);
     }
   }
 
   private void addRawVector(DoubleVector vector) {
     state.seen(true);
     for (int i = 0; i < vector.getPositionCount(); i++) {
+      SumDoubleAggregator.combine(state, vector.getDouble(i));
+    }
+  }
+
+  private void addRawVector(DoubleVector vector, BooleanVector mask) {
+    state.seen(true);
+    for (int i = 0; i < vector.getPositionCount(); i++) {
+      if (mask.getBoolean(i) == false) {
+        continue;
+      }
       SumDoubleAggregator.combine(state, vector.getDouble(i));
     }
   }
@@ -87,19 +113,45 @@ public final class SumDoubleAggregatorFunction implements AggregatorFunction {
     }
   }
 
+  private void addRawBlock(DoubleBlock block, BooleanVector mask) {
+    for (int p = 0; p < block.getPositionCount(); p++) {
+      if (mask.getBoolean(p) == false) {
+        continue;
+      }
+      if (block.isNull(p)) {
+        continue;
+      }
+      state.seen(true);
+      int start = block.getFirstValueIndex(p);
+      int end = start + block.getValueCount(p);
+      for (int i = start; i < end; i++) {
+        SumDoubleAggregator.combine(state, block.getDouble(i));
+      }
+    }
+  }
+
   @Override
   public void addIntermediateInput(Page page) {
     assert channels.size() == intermediateBlockCount();
     assert page.getBlockCount() >= channels.get(0) + intermediateStateDesc().size();
-    Block uncastBlock = page.getBlock(channels.get(0));
-    if (uncastBlock.areAllValuesNull()) {
+    Block valueUncast = page.getBlock(channels.get(0));
+    if (valueUncast.areAllValuesNull()) {
       return;
     }
-    DoubleVector value = page.<DoubleBlock>getBlock(channels.get(0)).asVector();
-    DoubleVector delta = page.<DoubleBlock>getBlock(channels.get(1)).asVector();
-    BooleanVector seen = page.<BooleanBlock>getBlock(channels.get(2)).asVector();
+    DoubleVector value = ((DoubleBlock) valueUncast).asVector();
     assert value.getPositionCount() == 1;
-    assert value.getPositionCount() == delta.getPositionCount() && value.getPositionCount() == seen.getPositionCount();
+    Block deltaUncast = page.getBlock(channels.get(1));
+    if (deltaUncast.areAllValuesNull()) {
+      return;
+    }
+    DoubleVector delta = ((DoubleBlock) deltaUncast).asVector();
+    assert delta.getPositionCount() == 1;
+    Block seenUncast = page.getBlock(channels.get(2));
+    if (seenUncast.areAllValuesNull()) {
+      return;
+    }
+    BooleanVector seen = ((BooleanBlock) seenUncast).asVector();
+    assert seen.getPositionCount() == 1;
     SumDoubleAggregator.combineIntermediate(state, value.getDouble(0), delta.getDouble(0), seen.getBoolean(0));
   }
 
@@ -111,7 +163,7 @@ public final class SumDoubleAggregatorFunction implements AggregatorFunction {
   @Override
   public void evaluateFinal(Block[] blocks, int offset, DriverContext driverContext) {
     if (state.seen() == false) {
-      blocks[offset] = Block.constantNullBlock(1, driverContext.blockFactory());
+      blocks[offset] = driverContext.blockFactory().newConstantNullBlock(1);
       return;
     }
     blocks[offset] = SumDoubleAggregator.evaluateFinal(state, driverContext);

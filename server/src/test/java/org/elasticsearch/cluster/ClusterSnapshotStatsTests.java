@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster;
@@ -49,7 +50,8 @@ public class ClusterSnapshotStatsTests extends AbstractWireSerializingTestCase<C
         "ABORTED",
         "MISSING",
         "WAITING",
-        "QUEUED" };
+        "QUEUED",
+        "PAUSED_FOR_NODE_REMOVAL" };
 
     @Override
     protected ClusterSnapshotStats createTestInstance() {
@@ -370,7 +372,9 @@ public class ClusterSnapshotStatsTests extends AbstractWireSerializingTestCase<C
                                 SnapshotsInProgress.ShardState.WAITING,
                                 0,
                                 SnapshotsInProgress.ShardState.QUEUED,
-                                1
+                                1,
+                                SnapshotsInProgress.ShardState.PAUSED_FOR_NODE_REMOVAL,
+                                0
                             )
                         )
                     )
@@ -392,7 +396,7 @@ public class ClusterSnapshotStatsTests extends AbstractWireSerializingTestCase<C
                                 new Snapshot("test-repo", new SnapshotId("snapshot", "uuid")),
                                 randomBoolean(),
                                 randomBoolean(),
-                                SnapshotsInProgress.State.INIT,
+                                SnapshotsInProgress.State.STARTED,
                                 Map.of("index", new IndexId("index", "uuid")),
                                 List.of(),
                                 List.of(),
@@ -430,8 +434,8 @@ public class ClusterSnapshotStatsTests extends AbstractWireSerializingTestCase<C
                         SnapshotDeletionsInProgress.of(
                             List.of(
                                 new SnapshotDeletionsInProgress.Entry(
-                                    List.of(new SnapshotId("deleting", "uuid")),
                                     "test-repo",
+                                    List.of(new SnapshotId("deleting", "uuid")),
                                     startTimes[2],
                                     randomNonNegativeLong(),
                                     SnapshotDeletionsInProgress.State.WAITING

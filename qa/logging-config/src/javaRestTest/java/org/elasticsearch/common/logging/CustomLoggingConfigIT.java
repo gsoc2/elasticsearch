@@ -1,14 +1,14 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.common.logging;
 
 import org.elasticsearch.core.SuppressForbidden;
-import org.elasticsearch.test.hamcrest.RegexMatcher;
 import org.elasticsearch.test.rest.ESRestTestCase;
 import org.hamcrest.Matchers;
 
@@ -21,6 +21,8 @@ import java.nio.file.Paths;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.List;
+
+import static org.hamcrest.Matchers.matchesRegex;
 
 /**
  * This test verifies that Elasticsearch can startup successfully with a custom logging config using variables introduced in
@@ -35,14 +37,14 @@ public class CustomLoggingConfigIT extends ESRestTestCase {
     public void testSuccessfulStartupWithCustomConfig() throws Exception {
         assertBusy(() -> {
             List<String> lines = readAllLines(getPlaintextLogFile());
-            assertThat(lines, Matchers.hasItem(RegexMatcher.matches(NODE_STARTED)));
+            assertThat(lines, Matchers.hasItem(matchesRegex(NODE_STARTED)));
         });
     }
 
     public void testParseAllV7JsonLines() throws Exception {
         assertBusy(() -> {
             List<String> lines = readAllLines(getJSONLogFile());
-            assertThat(lines, Matchers.hasItem(RegexMatcher.matches(NODE_STARTED)));
+            assertThat(lines, Matchers.hasItem(matchesRegex(NODE_STARTED)));
         });
     }
 

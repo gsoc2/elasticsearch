@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.admin.indices.diskusage;
@@ -11,6 +12,8 @@ package org.elasticsearch.action.admin.indices.diskusage;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.backward_codecs.lucene50.Lucene50PostingsFormat;
 import org.apache.lucene.backward_codecs.lucene84.Lucene84PostingsFormat;
+import org.apache.lucene.backward_codecs.lucene90.Lucene90PostingsFormat;
+import org.apache.lucene.backward_codecs.lucene99.Lucene99PostingsFormat;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.FieldsProducer;
 import org.apache.lucene.codecs.KnnVectorsReader;
@@ -18,7 +21,7 @@ import org.apache.lucene.codecs.NormsProducer;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.codecs.StoredFieldsReader;
 import org.apache.lucene.codecs.TermVectorsReader;
-import org.apache.lucene.codecs.lucene90.Lucene90PostingsFormat;
+import org.apache.lucene.codecs.lucene912.Lucene912PostingsFormat;
 import org.apache.lucene.index.BinaryDocValues;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.DirectoryReader;
@@ -54,6 +57,7 @@ import org.elasticsearch.common.lucene.FilterIndexCommit;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.core.CheckedConsumer;
 import org.elasticsearch.core.IOUtils;
+import org.elasticsearch.index.codec.postings.ES812PostingsFormat;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.store.LuceneFilesExtensions;
 
@@ -301,6 +305,15 @@ final class IndexDiskUsageAnalyzer {
     private static BlockTermState getBlockTermState(TermsEnum termsEnum, BytesRef term) throws IOException {
         if (term != null && termsEnum.seekExact(term)) {
             final TermState termState = termsEnum.termState();
+            if (termState instanceof final Lucene912PostingsFormat.IntBlockTermState blockTermState) {
+                return new BlockTermState(blockTermState.docStartFP, blockTermState.posStartFP, blockTermState.payStartFP);
+            }
+            if (termState instanceof final ES812PostingsFormat.IntBlockTermState blockTermState) {
+                return new BlockTermState(blockTermState.docStartFP, blockTermState.posStartFP, blockTermState.payStartFP);
+            }
+            if (termState instanceof final Lucene99PostingsFormat.IntBlockTermState blockTermState) {
+                return new BlockTermState(blockTermState.docStartFP, blockTermState.posStartFP, blockTermState.payStartFP);
+            }
             if (termState instanceof final Lucene90PostingsFormat.IntBlockTermState blockTermState) {
                 return new BlockTermState(blockTermState.docStartFP, blockTermState.posStartFP, blockTermState.payStartFP);
             }
@@ -310,6 +323,7 @@ final class IndexDiskUsageAnalyzer {
             if (termState instanceof final Lucene50PostingsFormat.IntBlockTermState blockTermState) {
                 return new BlockTermState(blockTermState.docStartFP, blockTermState.posStartFP, blockTermState.payStartFP);
             }
+            assert false : "unsupported postings format: " + termState;
         }
         return null;
     }
@@ -527,7 +541,6 @@ final class IndexDiskUsageAnalyzer {
         for (FieldInfo field : reader.getFieldInfos()) {
             cancellationChecker.checkForCancellation();
             directory.resetBytesRead();
-            final KnnCollector collector = new TopKnnCollector(100, Integer.MAX_VALUE);
             if (field.getVectorDimension() > 0) {
                 switch (field.getVectorEncoding()) {
                     case BYTE -> {
@@ -538,6 +551,10 @@ final class IndexDiskUsageAnalyzer {
 
                         // do a couple of randomized searches to figure out min and max offsets of index file
                         ByteVectorValues vectorValues = vectorReader.getByteVectorValues(field.name);
+                        final KnnCollector collector = new TopKnnCollector(
+                            Math.max(1, Math.min(100, vectorValues.size() - 1)),
+                            Integer.MAX_VALUE
+                        );
                         int numDocsToVisit = reader.maxDoc() < 10 ? reader.maxDoc() : 10 * (int) Math.log10(reader.maxDoc());
                         int skipFactor = Math.max(reader.maxDoc() / numDocsToVisit, 1);
                         for (int i = 0; i < reader.maxDoc(); i += skipFactor) {
@@ -557,6 +574,10 @@ final class IndexDiskUsageAnalyzer {
 
                         // do a couple of randomized searches to figure out min and max offsets of index file
                         FloatVectorValues vectorValues = vectorReader.getFloatVectorValues(field.name);
+                        final KnnCollector collector = new TopKnnCollector(
+                            Math.max(1, Math.min(100, vectorValues.size() - 1)),
+                            Integer.MAX_VALUE
+                        );
                         int numDocsToVisit = reader.maxDoc() < 10 ? reader.maxDoc() : 10 * (int) Math.log10(reader.maxDoc());
                         int skipFactor = Math.max(reader.maxDoc() / numDocsToVisit, 1);
                         for (int i = 0; i < reader.maxDoc(); i += skipFactor) {

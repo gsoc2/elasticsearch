@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.indices.mapping;
@@ -159,7 +160,9 @@ public class SimpleGetFieldMappingsIT extends ESIntegTestCase {
         String responseStrings = Strings.toString(responseBuilder);
 
         XContentBuilder prettyJsonBuilder = XContentFactory.jsonBuilder().prettyPrint();
-        prettyJsonBuilder.copyCurrentStructure(createParser(JsonXContent.jsonXContent, responseStrings));
+        try (var parser = createParser(JsonXContent.jsonXContent, responseStrings)) {
+            prettyJsonBuilder.copyCurrentStructure(parser);
+        }
         assertThat(responseStrings, equalTo(Strings.toString(prettyJsonBuilder)));
 
         params.put("pretty", "false");
@@ -170,7 +173,9 @@ public class SimpleGetFieldMappingsIT extends ESIntegTestCase {
         responseStrings = Strings.toString(responseBuilder);
 
         prettyJsonBuilder = XContentFactory.jsonBuilder().prettyPrint();
-        prettyJsonBuilder.copyCurrentStructure(createParser(JsonXContent.jsonXContent, responseStrings));
+        try (var parser = createParser(JsonXContent.jsonXContent, responseStrings)) {
+            prettyJsonBuilder.copyCurrentStructure(parser);
+        }
         assertThat(responseStrings, not(equalTo(Strings.toString(prettyJsonBuilder))));
 
     }

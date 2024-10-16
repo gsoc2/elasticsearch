@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.admin.cluster.desirednodes;
@@ -18,7 +19,6 @@ import org.elasticsearch.cluster.ClusterStateTaskExecutor;
 import org.elasticsearch.cluster.ClusterStateTaskListener;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
-import org.elasticsearch.cluster.desirednodes.DesiredNodesSettingsValidator;
 import org.elasticsearch.cluster.desirednodes.VersionConflictException;
 import org.elasticsearch.cluster.metadata.DesiredNode;
 import org.elasticsearch.cluster.metadata.DesiredNodes;
@@ -29,25 +29,21 @@ import org.elasticsearch.cluster.routing.allocation.AllocationService;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.cluster.service.MasterServiceTaskQueue;
 import org.elasticsearch.common.Priority;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.features.FeatureService;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
-import java.util.List;
 import java.util.Locale;
-import java.util.function.Consumer;
 
 import static java.lang.String.format;
 
 public class TransportUpdateDesiredNodesAction extends TransportMasterNodeAction<UpdateDesiredNodesRequest, UpdateDesiredNodesResponse> {
     private static final Logger logger = LogManager.getLogger(TransportUpdateDesiredNodesAction.class);
 
-    private final RerouteService rerouteService;
     private final FeatureService featureService;
-    private final Consumer<List<DesiredNode>> desiredNodesValidator;
     private final MasterServiceTaskQueue<UpdateDesiredNodesTask> taskQueue;
 
     @Inject
@@ -59,30 +55,6 @@ public class TransportUpdateDesiredNodesAction extends TransportMasterNodeAction
         ThreadPool threadPool,
         ActionFilters actionFilters,
         IndexNameExpressionResolver indexNameExpressionResolver,
-        AllocationService allocationService
-    ) {
-        this(
-            transportService,
-            clusterService,
-            rerouteService,
-            featureService,
-            threadPool,
-            actionFilters,
-            indexNameExpressionResolver,
-            new DesiredNodesSettingsValidator(),
-            allocationService
-        );
-    }
-
-    TransportUpdateDesiredNodesAction(
-        TransportService transportService,
-        ClusterService clusterService,
-        RerouteService rerouteService,
-        FeatureService featureService,
-        ThreadPool threadPool,
-        ActionFilters actionFilters,
-        IndexNameExpressionResolver indexNameExpressionResolver,
-        Consumer<List<DesiredNode>> desiredNodesValidator,
         AllocationService allocationService
     ) {
         super(
@@ -97,9 +69,7 @@ public class TransportUpdateDesiredNodesAction extends TransportMasterNodeAction
             UpdateDesiredNodesResponse::new,
             EsExecutors.DIRECT_EXECUTOR_SERVICE
         );
-        this.rerouteService = rerouteService;
         this.featureService = featureService;
-        this.desiredNodesValidator = desiredNodesValidator;
         this.taskQueue = clusterService.createTaskQueue(
             "update-desired-nodes",
             Priority.URGENT,
@@ -119,10 +89,14 @@ public class TransportUpdateDesiredNodesAction extends TransportMasterNodeAction
         ClusterState state,
         ActionListener<UpdateDesiredNodesResponse> responseListener
     ) throws Exception {
-        ActionListener.run(responseListener, listener -> {
-            desiredNodesValidator.accept(request.getNodes());
-            taskQueue.submitTask("update-desired-nodes", new UpdateDesiredNodesTask(request, listener), request.masterNodeTimeout());
-        });
+        ActionListener.run(
+            responseListener,
+            listener -> taskQueue.submitTask(
+                "update-desired-nodes",
+                new UpdateDesiredNodesTask(request, listener),
+                request.masterNodeTimeout()
+            )
+        );
     }
 
     @Override

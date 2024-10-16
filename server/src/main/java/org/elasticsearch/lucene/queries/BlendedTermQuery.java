@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.lucene.queries;
 
@@ -73,15 +74,14 @@ public abstract class BlendedTermQuery extends Query {
         if (rewritten != this) {
             return rewritten;
         }
-        IndexReader reader = searcher.getIndexReader();
-        IndexReaderContext context = reader.getContext();
         TermStates[] ctx = new TermStates[terms.length];
         int[] docFreqs = new int[ctx.length];
         for (int i = 0; i < terms.length; i++) {
-            ctx[i] = TermStates.build(context, terms[i], true);
+            ctx[i] = TermStates.build(searcher, terms[i], true);
             docFreqs[i] = ctx[i].docFreq();
         }
 
+        final IndexReader reader = searcher.getIndexReader();
         final int maxDoc = reader.maxDoc();
         blend(ctx, maxDoc, reader);
         return topLevelQuery(terms, ctx, docFreqs, maxDoc);

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.datastreams.lifecycle;
@@ -25,7 +26,8 @@ import java.util.function.LongSupplier;
 public record ErrorEntry(long firstOccurrenceTimestamp, String error, long recordedTimestamp, int retryCount)
     implements
         Writeable,
-        ToXContentObject {
+        ToXContentObject,
+        Comparable<ErrorEntry> {
 
     public ErrorEntry(StreamInput in) throws IOException {
         this(in.readLong(), in.readString(), in.readLong(), in.readInt());
@@ -76,5 +78,13 @@ public record ErrorEntry(long firstOccurrenceTimestamp, String error, long recor
         out.writeString(error);
         out.writeLong(recordedTimestamp);
         out.writeInt(retryCount);
+    }
+
+    /**
+     * Compares two error entries by the number of retries, in reversed order by default.
+     */
+    @Override
+    public int compareTo(ErrorEntry o) {
+        return Integer.compare(o.retryCount, retryCount);
     }
 }

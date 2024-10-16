@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.action.admin.cluster.configuration;
 
@@ -118,11 +119,13 @@ public class TransportClearVotingConfigExclusionsActionTests extends ESTestCase 
     public void testClearsVotingConfigExclusions() {
         final CountDownLatch countDownLatch = new CountDownLatch(1);
 
-        final ClearVotingConfigExclusionsRequest clearVotingConfigExclusionsRequest = new ClearVotingConfigExclusionsRequest();
+        final ClearVotingConfigExclusionsRequest clearVotingConfigExclusionsRequest = new ClearVotingConfigExclusionsRequest(
+            TEST_REQUEST_TIMEOUT
+        );
         clearVotingConfigExclusionsRequest.setWaitForRemoval(false);
         transportService.sendRequest(
             localNode,
-            ClearVotingConfigExclusionsAction.NAME,
+            TransportClearVotingConfigExclusionsAction.TYPE.name(),
             clearVotingConfigExclusionsRequest,
             expectSuccess(r -> {
                 assertNotNull(r);
@@ -136,11 +139,13 @@ public class TransportClearVotingConfigExclusionsActionTests extends ESTestCase 
     public void testTimesOutIfWaitingForNodesThatAreNotRemoved() {
         final CountDownLatch countDownLatch = new CountDownLatch(1);
 
-        final ClearVotingConfigExclusionsRequest clearVotingConfigExclusionsRequest = new ClearVotingConfigExclusionsRequest();
+        final ClearVotingConfigExclusionsRequest clearVotingConfigExclusionsRequest = new ClearVotingConfigExclusionsRequest(
+            TEST_REQUEST_TIMEOUT
+        );
         clearVotingConfigExclusionsRequest.setTimeout(TimeValue.timeValueMillis(100));
         transportService.sendRequest(
             localNode,
-            ClearVotingConfigExclusionsAction.NAME,
+            TransportClearVotingConfigExclusionsAction.TYPE.name(),
             clearVotingConfigExclusionsRequest,
             expectError(e -> {
                 assertThat(
@@ -164,8 +169,8 @@ public class TransportClearVotingConfigExclusionsActionTests extends ESTestCase 
 
         transportService.sendRequest(
             localNode,
-            ClearVotingConfigExclusionsAction.NAME,
-            new ClearVotingConfigExclusionsRequest(),
+            TransportClearVotingConfigExclusionsAction.TYPE.name(),
+            new ClearVotingConfigExclusionsRequest(TEST_REQUEST_TIMEOUT),
             expectSuccess(r -> {
                 assertThat(clusterService.getClusterApplierService().state().getVotingConfigExclusions(), empty());
                 countDownLatch.countDown();
@@ -186,8 +191,8 @@ public class TransportClearVotingConfigExclusionsActionTests extends ESTestCase 
 
         transportService.sendRequest(
             localNode,
-            ClearVotingConfigExclusionsAction.NAME,
-            new ClearVotingConfigExclusionsRequest(),
+            TransportClearVotingConfigExclusionsAction.TYPE.name(),
+            new ClearVotingConfigExclusionsRequest(TEST_REQUEST_TIMEOUT),
             expectError(e -> {
                 final Throwable rootCause = e.getRootCause();
                 assertThat(rootCause, instanceOf(IllegalStateException.class));
@@ -218,7 +223,7 @@ public class TransportClearVotingConfigExclusionsActionTests extends ESTestCase 
             }
 
             @Override
-            public Executor executor(ThreadPool threadPool) {
+            public Executor executor() {
                 return TransportResponseHandler.TRANSPORT_WORKER;
             }
 

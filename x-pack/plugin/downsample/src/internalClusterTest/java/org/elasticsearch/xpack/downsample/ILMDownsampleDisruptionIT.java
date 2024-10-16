@@ -10,6 +10,8 @@ package org.elasticsearch.xpack.downsample;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.action.DocWriteRequest;
+import org.elasticsearch.action.admin.cluster.shards.ClusterSearchShardsRequest;
+import org.elasticsearch.action.admin.cluster.shards.TransportClusterSearchShardsAction;
 import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
 import org.elasticsearch.action.admin.indices.get.GetIndexResponse;
 import org.elasticsearch.action.admin.indices.settings.get.GetSettingsRequest;
@@ -41,7 +43,8 @@ import org.elasticsearch.xpack.core.LocalStateCompositeXPackPlugin;
 import org.elasticsearch.xpack.core.ilm.LifecyclePolicy;
 import org.elasticsearch.xpack.core.ilm.LifecycleSettings;
 import org.elasticsearch.xpack.core.ilm.Phase;
-import org.elasticsearch.xpack.core.ilm.action.PutLifecycleAction;
+import org.elasticsearch.xpack.core.ilm.action.ILMActions;
+import org.elasticsearch.xpack.core.ilm.action.PutLifecycleRequest;
 import org.elasticsearch.xpack.ilm.IndexLifecycle;
 
 import java.io.IOException;
@@ -135,8 +138,8 @@ public class ILMDownsampleDisruptionIT extends ESIntegTestCase {
             )
         );
         LifecyclePolicy policy = new LifecyclePolicy(POLICY_NAME, phases);
-        PutLifecycleAction.Request putLifecycleRequest = new PutLifecycleAction.Request(policy);
-        assertAcked(client().execute(PutLifecycleAction.INSTANCE, putLifecycleRequest).actionGet());
+        PutLifecycleRequest putLifecycleRequest = new PutLifecycleRequest(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT, policy);
+        assertAcked(client().execute(ILMActions.PUT, putLifecycleRequest).actionGet());
     }
 
     public void testILMDownsampleRollingRestart() throws Exception {
@@ -194,7 +197,7 @@ public class ILMDownsampleDisruptionIT extends ESIntegTestCase {
 
         final String targetIndex = "downsample-1h-" + sourceIndex;
         startDownsampleTaskViaIlm(sourceIndex, targetIndex, disruptionStart, disruptionEnd);
-        waitUntil(() -> cluster.client().admin().cluster().preparePendingClusterTasks().get().pendingTasks().isEmpty());
+        waitUntil(() -> getClusterPendingTasks(cluster.client()).pendingTasks().isEmpty(), 60, TimeUnit.SECONDS);
         ensureStableCluster(cluster.numDataAndMasterNodes());
         assertTargetIndex(cluster, targetIndex, indexedDocs);
     }
@@ -323,12 +326,11 @@ public class ILMDownsampleDisruptionIT extends ESIntegTestCase {
         public void run() {
             listener.disruptionStart();
             try {
-                final String candidateNode = cluster.client(clientNode)
-                    .admin()
-                    .cluster()
-                    .prepareSearchShards(sourceIndex)
-                    .get()
-                    .getNodes()[0].getName();
+                final String candidateNode = safeExecute(
+                    cluster.client(clientNode),
+                    TransportClusterSearchShardsAction.TYPE,
+                    new ClusterSearchShardsRequest(TEST_REQUEST_TIMEOUT, sourceIndex)
+                ).getNodes()[0].getName();
                 logger.info("Candidate node [" + candidateNode + "]");
                 disruption.accept(candidateNode);
                 ensureGreen(sourceIndex);

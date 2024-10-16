@@ -1,14 +1,16 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.action.search;
 
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.join.ScoreMode;
+import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.index.query.NestedQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.search.SearchPhaseResult;
@@ -37,11 +39,11 @@ import java.util.function.Function;
  * @see CountedCollector#onFailure(int, SearchShardTarget, Exception)
  */
 final class DfsQueryPhase extends SearchPhase {
-    private final QueryPhaseResultConsumer queryResult;
+    private final SearchPhaseResults<SearchPhaseResult> queryResult;
     private final List<DfsSearchResult> searchResults;
     private final AggregatedDfs dfs;
     private final List<DfsKnnResults> knnResults;
-    private final Function<ArraySearchPhaseResults<SearchPhaseResult>, SearchPhase> nextPhaseFactory;
+    private final Function<SearchPhaseResults<SearchPhaseResult>, SearchPhase> nextPhaseFactory;
     private final SearchPhaseContext context;
     private final SearchTransportService searchTransportService;
     private final SearchProgressListener progressListener;
@@ -50,8 +52,8 @@ final class DfsQueryPhase extends SearchPhase {
         List<DfsSearchResult> searchResults,
         AggregatedDfs dfs,
         List<DfsKnnResults> knnResults,
-        QueryPhaseResultConsumer queryResult,
-        Function<ArraySearchPhaseResults<SearchPhaseResult>, SearchPhase> nextPhaseFactory,
+        SearchPhaseResults<SearchPhaseResult> queryResult,
+        Function<SearchPhaseResults<SearchPhaseResult>, SearchPhase> nextPhaseFactory,
         SearchPhaseContext context
     ) {
         super("dfs_query");
@@ -66,7 +68,7 @@ final class DfsQueryPhase extends SearchPhase {
 
         // register the release of the query consumer to free up the circuit breaker memory
         // at the end of the search
-        context.addReleasable(queryResult::decRef);
+        context.addReleasable(queryResult);
     }
 
     @Override
@@ -151,7 +153,12 @@ final class DfsQueryPhase extends SearchPhase {
             }
             scoreDocs.sort(Comparator.comparingInt(scoreDoc -> scoreDoc.doc));
             String nestedPath = dfsKnnResults.getNestedPath();
-            QueryBuilder query = new KnnScoreDocQueryBuilder(scoreDocs.toArray(new ScoreDoc[0]));
+            QueryBuilder query = new KnnScoreDocQueryBuilder(
+                scoreDocs.toArray(Lucene.EMPTY_SCORE_DOCS),
+                source.knnSearch().get(i).getField(),
+                source.knnSearch().get(i).getQueryVector(),
+                source.knnSearch().get(i).getSimilarity()
+            ).boost(source.knnSearch().get(i).boost()).queryName(source.knnSearch().get(i).queryName());
             if (nestedPath != null) {
                 query = new NestedQueryBuilder(nestedPath, query, ScoreMode.Max).innerHit(source.knnSearch().get(i).innerHit());
             }

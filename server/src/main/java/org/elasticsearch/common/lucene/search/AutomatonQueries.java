@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.common.lucene.search;
@@ -44,18 +45,17 @@ public class AutomatonQueries {
 
     /** Build an automaton query accepting all terms with the specified prefix, ASCII case insensitive. */
     public static AutomatonQuery caseInsensitivePrefixQuery(Term prefix) {
-        return new AutomatonQuery(prefix, caseInsensitivePrefix(prefix.text()));
+        return new CaseInsensitivePrefixQuery(prefix);
     }
 
     /** Build an automaton accepting all terms ASCII case insensitive. */
     public static AutomatonQuery caseInsensitiveTermQuery(Term term) {
-        BytesRef prefix = term.bytes();
-        return new AutomatonQuery(term, toCaseInsensitiveString(prefix));
+        return new CaseInsensitiveTermQuery(term);
     }
 
     /** Build an automaton matching a wildcard pattern, ASCII case insensitive. */
     public static AutomatonQuery caseInsensitiveWildcardQuery(Term wildcardquery) {
-        return new AutomatonQuery(wildcardquery, toCaseInsensitiveWildcardAutomaton(wildcardquery));
+        return new CaseInsensitiveWildcardQuery(wildcardquery);
     }
 
     /** String equality with support for wildcards */

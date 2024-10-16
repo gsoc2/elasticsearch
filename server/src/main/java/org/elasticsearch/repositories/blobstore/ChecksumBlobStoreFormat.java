@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.repositories.blobstore;
 
@@ -25,6 +26,7 @@ import org.elasticsearch.common.compress.CompressorFactory;
 import org.elasticsearch.common.io.Streams;
 import org.elasticsearch.common.lucene.store.IndexOutputOutputStream;
 import org.elasticsearch.common.xcontent.LoggingDeprecationHandler;
+import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentParserUtils;
 import org.elasticsearch.core.Nullable;
 import org.elasticsearch.gateway.CorruptStateException;
@@ -33,6 +35,7 @@ import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentFactory;
 import org.elasticsearch.xcontent.XContentParser;
+import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xcontent.XContentType;
 
 import java.io.FilterInputStream;
@@ -118,7 +121,7 @@ public final class ChecksumBlobStoreFormat<T> {
     public T read(String repoName, BlobContainer blobContainer, String name, NamedXContentRegistry namedXContentRegistry)
         throws IOException {
         String blobName = blobName(name);
-        try (InputStream in = blobContainer.readBlob(OperationPurpose.SNAPSHOT, blobName)) {
+        try (InputStream in = blobContainer.readBlob(OperationPurpose.SNAPSHOT_METADATA, blobName)) {
             return deserialize(repoName, namedXContentRegistry, in);
         }
     }
@@ -144,15 +147,23 @@ public final class ChecksumBlobStoreFormat<T> {
                 BytesReference bytesReference = Streams.readFully(wrappedStream);
                 deserializeMetaBlobInputStream.verifyFooter();
                 try (
-                    XContentParser parser = XContentType.SMILE.xContent()
-                        .createParser(namedXContentRegistry, LoggingDeprecationHandler.INSTANCE, bytesReference.streamInput())
+                    XContentParser parser = XContentHelper.createParserNotCompressed(
+                        XContentParserConfiguration.EMPTY.withRegistry(namedXContentRegistry)
+                            .withDeprecationHandler(LoggingDeprecationHandler.INSTANCE),
+                        bytesReference,
+                        XContentType.SMILE
+                    )
                 ) {
                     result = reader.apply(repoName, parser);
                     XContentParserUtils.ensureExpectedToken(null, parser.nextToken(), parser);
                 } catch (Exception e) {
                     try (
-                        XContentParser parser = XContentType.SMILE.xContent()
-                            .createParser(namedXContentRegistry, LoggingDeprecationHandler.INSTANCE, bytesReference.streamInput())
+                        XContentParser parser = XContentHelper.createParserNotCompressed(
+                            XContentParserConfiguration.EMPTY.withRegistry(namedXContentRegistry)
+                                .withDeprecationHandler(LoggingDeprecationHandler.INSTANCE),
+                            bytesReference,
+                            XContentType.SMILE
+                        )
                     ) {
                         result = fallbackReader.apply(repoName, parser);
                         XContentParserUtils.ensureExpectedToken(null, parser.nextToken(), parser);
@@ -345,7 +356,7 @@ public final class ChecksumBlobStoreFormat<T> {
         throws IOException {
         final String blobName = blobName(name);
         blobContainer.writeMetadataBlob(
-            OperationPurpose.SNAPSHOT,
+            OperationPurpose.SNAPSHOT_METADATA,
             blobName,
             false,
             false,

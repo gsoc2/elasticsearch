@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.telemetry.apm;
@@ -355,7 +356,7 @@ public class RecordingOtelMeter implements Meter {
 
     private class DoubleUpDownRecorder extends AbstractInstrument implements DoubleUpDownCounter, OtelInstrument {
         DoubleUpDownRecorder(String name) {
-            super(name, InstrumentType.LONG_UP_DOWN_COUNTER);
+            super(name, InstrumentType.DOUBLE_UP_DOWN_COUNTER);
         }
 
         protected DoubleUpDownRecorder(String name, InstrumentType instrument) {
@@ -616,7 +617,9 @@ public class RecordingOtelMeter implements Meter {
 
         @Override
         public DoubleHistogram build() {
-            return new DoubleHistogramRecorder(name);
+            DoubleHistogramRecorder histogram = new DoubleHistogramRecorder(name);
+            recorder.register(histogram, histogram.getInstrument(), name, description, unit);
+            return histogram;
         }
     }
 
@@ -661,7 +664,9 @@ public class RecordingOtelMeter implements Meter {
 
         @Override
         public LongHistogram build() {
-            return new LongHistogramRecorder(name);
+            LongHistogramRecorder histogram = new LongHistogramRecorder(name);
+            recorder.register(histogram, histogram.getInstrument(), name, description, unit);
+            return histogram;
         }
     }
 

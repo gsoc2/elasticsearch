@@ -78,16 +78,24 @@ public class CountedKeywordFieldMapper extends FieldMapper {
     public static final String CONTENT_TYPE = "counted_keyword";
     public static final String COUNT_FIELD_NAME_SUFFIX = "_count";
 
-    public static final FieldType FIELD_TYPE;
+    private static final FieldType FIELD_TYPE_INDEXED;
+    private static final FieldType FIELD_TYPE_NOT_INDEXED;
 
     static {
-        FieldType ft = new FieldType();
-        ft.setDocValuesType(DocValuesType.SORTED_SET);
-        ft.setTokenized(false);
-        ft.setOmitNorms(true);
-        ft.setIndexOptions(IndexOptions.DOCS);
-        ft.freeze();
-        FIELD_TYPE = freezeAndDeduplicateFieldType(ft);
+        FieldType indexed = new FieldType();
+        indexed.setDocValuesType(DocValuesType.SORTED_SET);
+        indexed.setTokenized(false);
+        indexed.setOmitNorms(true);
+        indexed.setIndexOptions(IndexOptions.DOCS);
+        FIELD_TYPE_INDEXED = freezeAndDeduplicateFieldType(indexed);
+
+        FieldType notIndexed = new FieldType();
+        notIndexed.setDocValuesType(DocValuesType.SORTED_SET);
+        notIndexed.setTokenized(false);
+        notIndexed.setOmitNorms(true);
+        notIndexed.setIndexOptions(IndexOptions.NONE);
+        FIELD_TYPE_NOT_INDEXED = freezeAndDeduplicateFieldType(notIndexed);
+
     }
 
     private static class CountedKeywordFieldType extends StringFieldType {
@@ -147,10 +155,6 @@ public class CountedKeywordFieldMapper extends FieldMapper {
                             return 0; // Unknown
                         }
 
-                        @Override
-                        public void close() {
-                            // nothing to close
-                        }
                     };
                 }
 
@@ -261,7 +265,12 @@ public class CountedKeywordFieldMapper extends FieldMapper {
         }
     }
 
+    private static CountedKeywordFieldMapper toType(FieldMapper in) {
+        return (CountedKeywordFieldMapper) in;
+    }
+
     public static class Builder extends FieldMapper.Builder {
+        private final Parameter<Boolean> indexed = Parameter.indexParam(m -> toType(m).mappedFieldType.isIndexed(), true);
         private final Parameter<Map<String, String>> meta = Parameter.metaParam();
 
         protected Builder(String name) {
@@ -270,27 +279,31 @@ public class CountedKeywordFieldMapper extends FieldMapper {
 
         @Override
         protected Parameter<?>[] getParameters() {
-            return new Parameter<?>[] { meta };
+            return new Parameter<?>[] { meta, indexed };
         }
 
         @Override
         public FieldMapper build(MapperBuilderContext context) {
 
-            BinaryFieldMapper countFieldMapper = new BinaryFieldMapper.Builder(name + COUNT_FIELD_NAME_SUFFIX, true).build(context);
+            BinaryFieldMapper countFieldMapper = new BinaryFieldMapper.Builder(
+                leafName() + COUNT_FIELD_NAME_SUFFIX,
+                context.isSourceSynthetic()
+            ).docValues(true).build(context);
+            boolean isIndexed = indexed.getValue();
+            FieldType ft = isIndexed ? FIELD_TYPE_INDEXED : FIELD_TYPE_NOT_INDEXED;
             return new CountedKeywordFieldMapper(
-                name,
-                FIELD_TYPE,
+                leafName(),
+                ft,
                 new CountedKeywordFieldType(
-                    context.buildFullName(name),
-                    true,
+                    context.buildFullName(leafName()),
+                    isIndexed,
                     false,
                     true,
-                    new TextSearchInfo(FIELD_TYPE, null, KEYWORD_ANALYZER, KEYWORD_ANALYZER),
+                    new TextSearchInfo(ft, null, KEYWORD_ANALYZER, KEYWORD_ANALYZER),
                     meta.getValue(),
                     countFieldMapper.fieldType()
                 ),
-                multiFieldsBuilder.build(this, context),
-                copyTo,
+                builderParams(this, context),
                 countFieldMapper
             );
         }
@@ -305,11 +318,10 @@ public class CountedKeywordFieldMapper extends FieldMapper {
         String simpleName,
         FieldType fieldType,
         MappedFieldType mappedFieldType,
-        MultiFields multiFields,
-        CopyTo copyTo,
+        BuilderParams builderParams,
         BinaryFieldMapper countFieldMapper
     ) {
-        super(simpleName, mappedFieldType, multiFields, copyTo);
+        super(simpleName, mappedFieldType, builderParams);
         this.fieldType = fieldType;
         this.countFieldMapper = countFieldMapper;
     }
@@ -336,12 +348,12 @@ public class CountedKeywordFieldMapper extends FieldMapper {
         int i = 0;
         int[] counts = new int[values.size()];
         for (Map.Entry<String, Integer> value : values.entrySet()) {
-            context.doc().add(new KeywordFieldMapper.KeywordField(name(), new BytesRef(value.getKey()), fieldType));
+            context.doc().add(new KeywordFieldMapper.KeywordField(fullPath(), new BytesRef(value.getKey()), fieldType));
             counts[i++] = value.getValue();
         }
         BytesStreamOutput streamOutput = new BytesStreamOutput();
         streamOutput.writeVIntArray(counts);
-        context.doc().add(new BinaryDocValuesField(countFieldMapper.name(), streamOutput.bytes().toBytesRef()));
+        context.doc().add(new BinaryDocValuesField(countFieldMapper.fullPath(), streamOutput.bytes().toBytesRef()));
     }
 
     private void parseArray(DocumentParserContext context, SortedMap<String, Integer> values) throws IOException {
@@ -383,7 +395,7 @@ public class CountedKeywordFieldMapper extends FieldMapper {
 
     @Override
     public FieldMapper.Builder getMergeBuilder() {
-        return new Builder(simpleName()).init(this);
+        return new Builder(leafName()).init(this);
     }
 
     @Override

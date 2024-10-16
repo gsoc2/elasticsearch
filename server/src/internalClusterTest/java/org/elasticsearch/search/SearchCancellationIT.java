@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search;
@@ -169,21 +170,25 @@ public class SearchCancellationIT extends AbstractSearchCancellationTestCase {
 
         logger.info("Executing search");
         TimeValue keepAlive = TimeValue.timeValueSeconds(5);
+        String scrollId;
         SearchResponse searchResponse = prepareSearch("test").setScroll(keepAlive)
             .setSize(2)
             .setQuery(scriptQuery(new Script(ScriptType.INLINE, "mockscript", SEARCH_BLOCK_SCRIPT_NAME, Collections.emptyMap())))
             .get();
+        try {
+            assertNotNull(searchResponse.getScrollId());
 
-        assertNotNull(searchResponse.getScrollId());
+            // Enable block so the second request would block
+            for (ScriptedBlockPlugin plugin : plugins) {
+                plugin.reset();
+                plugin.enableBlock();
+            }
 
-        // Enable block so the second request would block
-        for (ScriptedBlockPlugin plugin : plugins) {
-            plugin.reset();
-            plugin.enableBlock();
+            scrollId = searchResponse.getScrollId();
+            logger.info("Executing scroll with id {}", scrollId);
+        } finally {
+            searchResponse.decRef();
         }
-
-        String scrollId = searchResponse.getScrollId();
-        logger.info("Executing scroll with id {}", scrollId);
         ActionFuture<SearchResponse> scrollResponse = client().prepareSearchScroll(searchResponse.getScrollId())
             .setScroll(keepAlive)
             .execute();
@@ -233,6 +238,7 @@ public class SearchCancellationIT extends AbstractSearchCancellationTestCase {
         }
     }
 
+    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/99929")
     public void testCancelFailedSearchWhenPartialResultDisallowed() throws Exception {
         // Have at least two nodes so that we have parallel execution of two request guaranteed even if max concurrent requests per node
         // are limited to 1
@@ -245,11 +251,10 @@ public class SearchCancellationIT extends AbstractSearchCancellationTestCase {
         Thread searchThread = new Thread(() -> {
             SearchPhaseExecutionException e = expectThrows(
                 SearchPhaseExecutionException.class,
-                () -> prepareSearch("test").setSearchType(SearchType.QUERY_THEN_FETCH)
+                prepareSearch("test").setSearchType(SearchType.QUERY_THEN_FETCH)
                     .setQuery(scriptQuery(new Script(ScriptType.INLINE, "mockscript", SEARCH_BLOCK_SCRIPT_NAME, Collections.emptyMap())))
                     .setAllowPartialSearchResults(false)
                     .setSize(1000)
-                    .get()
             );
             assertThat(e.getMessage(), containsString("Partial shards failure"));
         });

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.simple;
@@ -11,6 +12,7 @@ package org.elasticsearch.search.simple;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchPhaseExecutionException;
 import org.elasticsearch.action.search.SearchRequestBuilder;
+import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.action.support.WriteRequest.RefreshPolicy;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.CollectionUtils;
@@ -63,13 +65,8 @@ public class SimpleSearchIT extends ESIntegTestCase {
     }
 
     public void testSearchNullIndex() {
-        expectThrows(NullPointerException.class, () -> prepareSearch((String) null).setQuery(QueryBuilders.termQuery("_id", "XXX1")).get());
-
-        expectThrows(
-            NullPointerException.class,
-            () -> prepareSearch((String[]) null).setQuery(QueryBuilders.termQuery("_id", "XXX1")).get()
-        );
-
+        expectThrows(NullPointerException.class, () -> prepareSearch((String) null));
+        expectThrows(NullPointerException.class, () -> prepareSearch((String[]) null));
     }
 
     public void testSearchRandomPreference() throws InterruptedException, ExecutionException {
@@ -458,10 +455,11 @@ public class SimpleSearchIT extends ESIntegTestCase {
             .get();
 
         String queryJson = "{ \"field\" : { \"value\" : 80315953321748200608 } }";
-        XContentParser parser = createParser(JsonXContent.jsonXContent, queryJson);
-        parser.nextToken();
-        TermQueryBuilder query = TermQueryBuilder.fromXContent(parser);
-        assertHitCount(prepareSearch("idx").setQuery(query), 1);
+        try (XContentParser parser = createParser(JsonXContent.jsonXContent, queryJson)) {
+            parser.nextToken();
+            TermQueryBuilder query = TermQueryBuilder.fromXContent(parser);
+            assertHitCount(prepareSearch("idx").setQuery(query), 1);
+        }
     }
 
     public void testTooLongRegexInRegexpQuery() throws Exception {
@@ -475,7 +473,7 @@ public class SimpleSearchIT extends ESIntegTestCase {
         }
         SearchPhaseExecutionException e = expectThrows(
             SearchPhaseExecutionException.class,
-            () -> prepareSearch("idx").setQuery(QueryBuilders.regexpQuery("num", regexp.toString())).get()
+            prepareSearch("idx").setQuery(QueryBuilders.regexpQuery("num", regexp.toString()))
         );
         assertThat(
             e.getRootCause().getMessage(),
@@ -493,8 +491,79 @@ public class SimpleSearchIT extends ESIntegTestCase {
         );
     }
 
+    public void testTooLongPrefixInPrefixQuery() throws Exception {
+        createIndex("idx");
+
+        // Ensure the field `num` exists in the mapping
+        client().admin()
+            .indices()
+            .preparePutMapping("idx")
+            .setSource("{\"properties\":{\"num\":{\"type\":\"keyword\"}}}", XContentType.JSON)
+            .get();
+
+        // Index a simple document to ensure the field `num` is in the index
+        indexRandom(true, prepareIndex("idx").setSource("{\"num\":\"test\"}", XContentType.JSON));
+
+        int defaultMaxRegexLength = IndexSettings.MAX_REGEX_LENGTH_SETTING.get(Settings.EMPTY);
+        StringBuilder prefix = new StringBuilder(defaultMaxRegexLength);
+
+        while (prefix.length() <= defaultMaxRegexLength) {
+            prefix.append("a");
+        }
+
+        SearchPhaseExecutionException e = expectThrows(
+            SearchPhaseExecutionException.class,
+            () -> client().prepareSearch("idx").setQuery(QueryBuilders.prefixQuery("num", prefix.toString())).get()
+        );
+        assertThat(
+            e.getRootCause().getMessage(),
+            containsString(
+                "The length of prefix ["
+                    + prefix.length()
+                    + "] used in the Prefix Query request has exceeded "
+                    + "the allowed maximum of ["
+                    + defaultMaxRegexLength
+                    + "]. "
+                    + "This maximum can be set by changing the ["
+                    + IndexSettings.MAX_REGEX_LENGTH_SETTING.getKey()
+                    + "] index level setting."
+            )
+        );
+    }
+
+    public void testStrictlyCountRequest() throws Exception {
+        createIndex("test_count_1");
+        indexRandom(
+            true,
+            prepareIndex("test_count_1").setId("1").setSource("field", "value"),
+            prepareIndex("test_count_1").setId("2").setSource("field", "value"),
+            prepareIndex("test_count_1").setId("3").setSource("field", "value"),
+            prepareIndex("test_count_1").setId("4").setSource("field", "value"),
+            prepareIndex("test_count_1").setId("5").setSource("field", "value"),
+            prepareIndex("test_count_1").setId("6").setSource("field", "value")
+        );
+
+        createIndex("test_count_2");
+        indexRandom(
+            true,
+            prepareIndex("test_count_2").setId("1").setSource("field", "value_2"),
+            prepareIndex("test_count_2").setId("2").setSource("field", "value_2"),
+            prepareIndex("test_count_2").setId("3").setSource("field", "value_2"),
+            prepareIndex("test_count_2").setId("4").setSource("field", "value_2"),
+            prepareIndex("test_count_2").setId("6").setSource("field", "value_2")
+        );
+        assertNoFailuresAndResponse(
+            prepareSearch("test_count_1", "test_count_2").setTrackTotalHits(true).setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0),
+            response -> {
+                assertThat(response.getHits().getTotalHits().value, equalTo(11L));
+                assertThat(response.getHits().getHits().length, equalTo(0));
+            }
+        );
+
+    }
+
     private void assertWindowFails(SearchRequestBuilder search) {
-        SearchPhaseExecutionException e = expectThrows(SearchPhaseExecutionException.class, () -> search.get());
+        SearchPhaseExecutionException e = expectThrows(SearchPhaseExecutionException.class, search);
         assertThat(
             e.toString(),
             containsString(
@@ -507,7 +576,7 @@ public class SimpleSearchIT extends ESIntegTestCase {
 
     private void assertRescoreWindowFails(int windowSize) {
         SearchRequestBuilder search = prepareSearch("idx").addRescorer(new QueryRescorerBuilder(matchAllQuery()).windowSize(windowSize));
-        SearchPhaseExecutionException e = expectThrows(SearchPhaseExecutionException.class, () -> search.get());
+        SearchPhaseExecutionException e = expectThrows(SearchPhaseExecutionException.class, search);
         assertThat(
             e.toString(),
             containsString(

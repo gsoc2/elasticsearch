@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 import org.apache.tools.ant.filters.ReplaceTokens
@@ -119,6 +120,10 @@ gradlePlugin {
       id = 'elasticsearch.java-doc'
       implementationClass = 'org.elasticsearch.gradle.internal.ElasticsearchJavadocPlugin'
     }
+    javaBase {
+      id = 'elasticsearch.java-base'
+      implementationClass = 'org.elasticsearch.gradle.internal.ElasticsearchJavaBasePlugin'
+    }
     java {
       id = 'elasticsearch.java'
       implementationClass = 'org.elasticsearch.gradle.internal.ElasticsearchJavaPlugin'
@@ -138,6 +143,14 @@ gradlePlugin {
     javaModulePath {
       id = 'elasticsearch.java-module'
       implementationClass = 'org.elasticsearch.gradle.internal.ElasticsearchJavaModulePathPlugin'
+    }
+    mrjar {
+      id = 'elasticsearch.mrjar'
+      implementationClass = 'org.elasticsearch.gradle.internal.MrjarPlugin'
+    }
+    embeddedProvider {
+      id = 'elasticsearch.embedded-providers'
+      implementationClass = 'org.elasticsearch.gradle.internal.EmbeddedProviderPlugin'
     }
     releaseTools {
       id = 'elasticsearch.release-tools'
@@ -167,6 +180,10 @@ gradlePlugin {
       id = 'elasticsearch.test.fixtures'
       implementationClass = 'org.elasticsearch.gradle.internal.testfixtures.TestFixturesPlugin'
     }
+    deployTestFixtures {
+      id = 'elasticsearch.deploy-test-fixtures'
+      implementationClass = 'org.elasticsearch.gradle.internal.testfixtures.TestFixturesDeployPlugin'
+    }
     testBase {
       id = 'elasticsearch.test-base'
       implementationClass = 'org.elasticsearch.gradle.internal.ElasticsearchTestBasePlugin'
@@ -194,6 +211,10 @@ gradlePlugin {
     legacyYamlRestTest {
       id = 'elasticsearch.legacy-yaml-rest-test'
       implementationClass = 'org.elasticsearch.gradle.internal.test.rest.LegacyYamlRestTestPlugin'
+    }
+    cacheTestFixtures {
+        id = 'elasticsearch.cache-test-fixtures'
+        implementationClass = 'org.elasticsearch.gradle.internal.packer.CacheTestFixtureResourcesPlugin'
     }
     yamlRestTest {
       id = 'elasticsearch.internal-yaml-rest-test'
@@ -225,6 +246,7 @@ sourceSets {
 
 tasks.withType(JavaCompile).configureEach {
   options.encoding = 'UTF-8'
+  options.incremental = System.getenv("JENKINS_URL") == null && System.getenv("BUILDKITE_BUILD_URL") == null && System.getProperty("isCI") == null
 }
 
 tasks.named('licenseHeaders').configure {
@@ -236,6 +258,9 @@ tasks.named('licenseHeaders').configure {
  *****************************************************************************/
 
 repositories {
+  maven {
+    url 'https://jitpack.io'
+  }
   mavenCentral()
   gradlePluginPortal()
 }
@@ -250,10 +275,7 @@ dependencies {
     // ensuring brought asm version brought in by spock is up-to-date
     testImplementation buildLibs.asm
     integTestImplementation buildLibs.asm
-    integTestImplementation('org.ow2.asm:asm:9.5')
-    api("org.yaml:snakeyaml") {
-      version { strictly(versions.snakeyaml) }
-    }
+    api(buildLibs.snakeyaml)
   }
   // Forcefully downgrade the jackson platform as used in production
   api enforcedPlatform(buildLibs.jackson.platform)
@@ -288,6 +310,10 @@ dependencies {
   api buildLibs.httpcore
 
   compileOnly buildLibs.checkstyle
+  compileOnly buildLibs.reflections
+
+  implementation buildLibs.javaparser
+
   runtimeOnly "org.elasticsearch.gradle:reaper:$version"
   testImplementation buildLibs.checkstyle
   testImplementation buildLibs.wiremock
@@ -356,6 +382,15 @@ tasks.register("bootstrapPerformanceTests", Copy) {
 
 tasks.named("jar") {
   exclude("classpath.index")
+}
+
+spotless {
+  java {
+    // IDEs can sometimes run annotation processors that leave files in
+    // here, causing Spotless to complain. Even though this path ought not
+    // to exist, exclude it anyway in order to avoid spurious failures.
+    toggleOffOn()
+  }
 }
 
 def resolveMainWrapperVersion() {

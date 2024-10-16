@@ -55,19 +55,45 @@ public final class MinLongAggregatorFunction implements AggregatorFunction {
   }
 
   @Override
-  public void addRawInput(Page page) {
+  public void addRawInput(Page page, BooleanVector mask) {
+    if (mask.allFalse()) {
+      // Entire page masked away
+      return;
+    }
+    if (mask.allTrue()) {
+      // No masking
+      LongBlock block = page.getBlock(channels.get(0));
+      LongVector vector = block.asVector();
+      if (vector != null) {
+        addRawVector(vector);
+      } else {
+        addRawBlock(block);
+      }
+      return;
+    }
+    // Some positions masked away, others kept
     LongBlock block = page.getBlock(channels.get(0));
     LongVector vector = block.asVector();
     if (vector != null) {
-      addRawVector(vector);
+      addRawVector(vector, mask);
     } else {
-      addRawBlock(block);
+      addRawBlock(block, mask);
     }
   }
 
   private void addRawVector(LongVector vector) {
     state.seen(true);
     for (int i = 0; i < vector.getPositionCount(); i++) {
+      state.longValue(MinLongAggregator.combine(state.longValue(), vector.getLong(i)));
+    }
+  }
+
+  private void addRawVector(LongVector vector, BooleanVector mask) {
+    state.seen(true);
+    for (int i = 0; i < vector.getPositionCount(); i++) {
+      if (mask.getBoolean(i) == false) {
+        continue;
+      }
       state.longValue(MinLongAggregator.combine(state.longValue(), vector.getLong(i)));
     }
   }
@@ -86,18 +112,39 @@ public final class MinLongAggregatorFunction implements AggregatorFunction {
     }
   }
 
+  private void addRawBlock(LongBlock block, BooleanVector mask) {
+    for (int p = 0; p < block.getPositionCount(); p++) {
+      if (mask.getBoolean(p) == false) {
+        continue;
+      }
+      if (block.isNull(p)) {
+        continue;
+      }
+      state.seen(true);
+      int start = block.getFirstValueIndex(p);
+      int end = start + block.getValueCount(p);
+      for (int i = start; i < end; i++) {
+        state.longValue(MinLongAggregator.combine(state.longValue(), block.getLong(i)));
+      }
+    }
+  }
+
   @Override
   public void addIntermediateInput(Page page) {
     assert channels.size() == intermediateBlockCount();
     assert page.getBlockCount() >= channels.get(0) + intermediateStateDesc().size();
-    Block uncastBlock = page.getBlock(channels.get(0));
-    if (uncastBlock.areAllValuesNull()) {
+    Block minUncast = page.getBlock(channels.get(0));
+    if (minUncast.areAllValuesNull()) {
       return;
     }
-    LongVector min = page.<LongBlock>getBlock(channels.get(0)).asVector();
-    BooleanVector seen = page.<BooleanBlock>getBlock(channels.get(1)).asVector();
+    LongVector min = ((LongBlock) minUncast).asVector();
     assert min.getPositionCount() == 1;
-    assert min.getPositionCount() == seen.getPositionCount();
+    Block seenUncast = page.getBlock(channels.get(1));
+    if (seenUncast.areAllValuesNull()) {
+      return;
+    }
+    BooleanVector seen = ((BooleanBlock) seenUncast).asVector();
+    assert seen.getPositionCount() == 1;
     if (seen.getBoolean(0)) {
       state.longValue(MinLongAggregator.combine(state.longValue(), min.getLong(0)));
       state.seen(true);
@@ -112,10 +159,10 @@ public final class MinLongAggregatorFunction implements AggregatorFunction {
   @Override
   public void evaluateFinal(Block[] blocks, int offset, DriverContext driverContext) {
     if (state.seen() == false) {
-      blocks[offset] = Block.constantNullBlock(1, driverContext.blockFactory());
+      blocks[offset] = driverContext.blockFactory().newConstantNullBlock(1);
       return;
     }
-    blocks[offset] = LongBlock.newConstantBlockWith(state.longValue(), 1, driverContext.blockFactory());
+    blocks[offset] = driverContext.blockFactory().newConstantLongBlockWith(state.longValue(), 1);
   }
 
   @Override

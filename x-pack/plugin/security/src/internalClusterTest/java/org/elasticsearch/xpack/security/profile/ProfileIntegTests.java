@@ -42,7 +42,6 @@ import org.elasticsearch.xpack.core.security.action.profile.UpdateProfileDataAct
 import org.elasticsearch.xpack.core.security.action.profile.UpdateProfileDataRequest;
 import org.elasticsearch.xpack.core.security.action.role.PutRoleAction;
 import org.elasticsearch.xpack.core.security.action.role.PutRoleRequest;
-import org.elasticsearch.xpack.core.security.action.user.ChangePasswordRequestBuilder;
 import org.elasticsearch.xpack.core.security.action.user.GetUsersAction;
 import org.elasticsearch.xpack.core.security.action.user.GetUsersRequest;
 import org.elasticsearch.xpack.core.security.action.user.GetUsersResponse;
@@ -65,6 +64,7 @@ import org.elasticsearch.xpack.core.security.authz.privilege.ApplicationPrivileg
 import org.elasticsearch.xpack.core.security.user.AnonymousUser;
 import org.elasticsearch.xpack.core.security.user.ElasticUser;
 import org.elasticsearch.xpack.core.security.user.User;
+import org.elasticsearch.xpack.security.action.user.ChangePasswordRequestBuilder;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -133,7 +133,7 @@ public class ProfileIntegTests extends AbstractProfileIntegTestCase {
         final Settings settings = getIndexResponse.getSettings().get(INTERNAL_SECURITY_PROFILE_INDEX_8);
         assertThat(settings.get("index.number_of_shards"), equalTo("1"));
         assertThat(settings.get("index.auto_expand_replicas"), equalTo("0-1"));
-        assertThat(settings.get("index.routing.allocation.include._tier_preference"), equalTo("data_content"));
+        assertThat(settings.get("index.routing.allocation.include._tier_preference"), equalTo("data_hot,data_content"));
 
         final Map<String, Object> mappings = getIndexResponse.getMappings().get(INTERNAL_SECURITY_PROFILE_INDEX_8).getSourceAsMap();
 
@@ -451,7 +451,7 @@ public class ProfileIntegTests extends AbstractProfileIntegTestCase {
         final List<String> spaces = List.of("space1", "space2", "space3", "space4", "*");
         final List<Profile> profiles = spaces.stream().map(space -> {
             final PlainActionFuture<Profile> future1 = new PlainActionFuture<>();
-            final String lastName = randomAlphaOfLengthBetween(3, 8);
+            final String lastName = randomAlphaOfLengthBetween(3, 8) + space;
             final Authentication.RealmRef realmRef = randomBoolean()
                 ? AuthenticationTestHelper.randomRealmRef(false)
                 : new Authentication.RealmRef(

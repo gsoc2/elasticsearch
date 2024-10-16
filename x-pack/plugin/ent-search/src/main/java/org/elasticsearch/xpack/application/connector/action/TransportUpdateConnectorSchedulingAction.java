@@ -11,26 +11,20 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.HandledTransportAction;
 import org.elasticsearch.client.internal.Client;
-import org.elasticsearch.cluster.service.ClusterService;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.application.connector.ConnectorIndexService;
 
 public class TransportUpdateConnectorSchedulingAction extends HandledTransportAction<
     UpdateConnectorSchedulingAction.Request,
-    UpdateConnectorSchedulingAction.Response> {
+    ConnectorUpdateActionResponse> {
 
     protected final ConnectorIndexService connectorIndexService;
 
     @Inject
-    public TransportUpdateConnectorSchedulingAction(
-        TransportService transportService,
-        ClusterService clusterService,
-        ActionFilters actionFilters,
-        Client client
-    ) {
+    public TransportUpdateConnectorSchedulingAction(TransportService transportService, ActionFilters actionFilters, Client client) {
         super(
             UpdateConnectorSchedulingAction.NAME,
             transportService,
@@ -45,11 +39,8 @@ public class TransportUpdateConnectorSchedulingAction extends HandledTransportAc
     protected void doExecute(
         Task task,
         UpdateConnectorSchedulingAction.Request request,
-        ActionListener<UpdateConnectorSchedulingAction.Response> listener
+        ActionListener<ConnectorUpdateActionResponse> listener
     ) {
-        connectorIndexService.updateConnectorScheduling(
-            request,
-            listener.map(r -> new UpdateConnectorSchedulingAction.Response(r.getResult()))
-        );
+        connectorIndexService.updateConnectorScheduling(request, listener.map(r -> new ConnectorUpdateActionResponse(r.getResult())));
     }
 }

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.functionscore;
@@ -659,14 +660,14 @@ public class DecayFunctionScoreIT extends ESIntegTestCase {
 
         SearchPhaseExecutionException e = expectThrows(
             SearchPhaseExecutionException.class,
-            () -> client().search(
+            client().search(
                 new SearchRequest(new String[] {}).searchType(SearchType.QUERY_THEN_FETCH)
                     .source(
                         searchSource().query(
                             functionScoreQuery(termQuery("test", "value"), gaussDecayFunction("num1", "2013-05-28", "-1d"))
                         )
                     )
-            ).actionGet()
+            )
         );
         assertThat(e.getMessage(), is("all shards failed"));
     }
@@ -987,7 +988,7 @@ public class DecayFunctionScoreIT extends ESIntegTestCase {
 
         SearchPhaseExecutionException e = expectThrows(
             SearchPhaseExecutionException.class,
-            () -> client().search(
+            client().search(
                 new SearchRequest(new String[] {}).searchType(SearchType.QUERY_THEN_FETCH)
                     .source(
                         searchSource().size(numDocs)
@@ -997,7 +998,7 @@ public class DecayFunctionScoreIT extends ESIntegTestCase {
                                 )
                             )
                     )
-            ).actionGet()
+            )
         );
         assertThat(e.getMessage(), is("all shards failed"));
     }
@@ -1028,7 +1029,7 @@ public class DecayFunctionScoreIT extends ESIntegTestCase {
         // so, we indexed a string field, but now we try to score a num field
         SearchPhaseExecutionException e = expectThrows(
             SearchPhaseExecutionException.class,
-            () -> client().search(
+            client().search(
                 new SearchRequest(new String[] {}).searchType(SearchType.QUERY_THEN_FETCH)
                     .source(
                         searchSource().query(
@@ -1037,7 +1038,7 @@ public class DecayFunctionScoreIT extends ESIntegTestCase {
                             )
                         )
                     )
-            ).actionGet()
+            )
         );
         assertThat(e.getMessage(), is("all shards failed"));
     }

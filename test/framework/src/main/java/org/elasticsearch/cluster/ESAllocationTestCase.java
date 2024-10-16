@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster;
@@ -55,6 +56,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.Set;
+import java.util.function.Predicate;
 
 import static org.elasticsearch.cluster.ClusterModule.BALANCED_ALLOCATOR;
 import static org.elasticsearch.cluster.ClusterModule.DESIRED_BALANCE_ALLOCATOR;
@@ -330,7 +332,7 @@ public abstract class ESAllocationTestCase extends ESTestCase {
     public static ClusterState reroute(AllocationService allocationService, ClusterState clusterState) {
         final var listener = new PlainActionFuture<Void>();
         final var result = allocationService.reroute(clusterState, "test reroute", listener);
-        listener.result(); // ensures it completed successfully
+        safeGet(listener::result); // ensures it completed successfully
         return result;
     }
 
@@ -412,7 +414,7 @@ public abstract class ESAllocationTestCase extends ESTestCase {
         }
 
         @Override
-        public void afterPrimariesBeforeReplicas(RoutingAllocation allocation) {
+        public void afterPrimariesBeforeReplicas(RoutingAllocation allocation, Predicate<ShardRouting> isRelevantShardPredicate) {
             // no-op
         }
 
@@ -422,10 +424,10 @@ public abstract class ESAllocationTestCase extends ESTestCase {
             RoutingAllocation allocation,
             UnassignedAllocationHandler unassignedAllocationHandler
         ) {
-            if (shardRouting.primary() || shardRouting.unassignedInfo().getReason() == UnassignedInfo.Reason.INDEX_CREATED) {
+            if (shardRouting.primary() || shardRouting.unassignedInfo().reason() == UnassignedInfo.Reason.INDEX_CREATED) {
                 return;
             }
-            if (shardRouting.unassignedInfo().isDelayed()) {
+            if (shardRouting.unassignedInfo().delayed()) {
                 unassignedAllocationHandler.removeAndIgnore(UnassignedInfo.AllocationStatus.DELAYED_ALLOCATION, allocation.changes());
             }
         }

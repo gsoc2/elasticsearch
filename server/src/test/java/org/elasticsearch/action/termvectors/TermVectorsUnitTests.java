@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.termvectors;
@@ -294,17 +295,18 @@ public class TermVectorsUnitTests extends ESTestCase {
 
     public void testMultiParser() throws Exception {
         byte[] bytes = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/termvectors/multiRequest1.json");
-        XContentParser data = createParser(JsonXContent.jsonXContent, bytes);
-        MultiTermVectorsRequest request = new MultiTermVectorsRequest();
-        request.add(new TermVectorsRequest(), data);
-        checkParsedParameters(request);
+        try (XContentParser parser = createParser(JsonXContent.jsonXContent, bytes)) {
+            MultiTermVectorsRequest request = new MultiTermVectorsRequest();
+            request.add(new TermVectorsRequest(), parser);
+            checkParsedParameters(request);
+        }
 
         bytes = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/termvectors/multiRequest2.json");
-        data = createParser(JsonXContent.jsonXContent, new BytesArray(bytes));
-        request = new MultiTermVectorsRequest();
-        request.add(new TermVectorsRequest(), data);
-
-        checkParsedParameters(request);
+        try (var parser = createParser(JsonXContent.jsonXContent, new BytesArray(bytes))) {
+            MultiTermVectorsRequest request = new MultiTermVectorsRequest();
+            request.add(new TermVectorsRequest(), parser);
+            checkParsedParameters(request);
+        }
     }
 
     void checkParsedParameters(MultiTermVectorsRequest request) {

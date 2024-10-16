@@ -7,17 +7,21 @@
 
 package org.elasticsearch.xpack.inference.services;
 
-import org.apache.lucene.util.SetOnce;
 import org.elasticsearch.TransportVersion;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.PlainActionFuture;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.inference.ChunkedInferenceServiceResults;
+import org.elasticsearch.inference.ChunkingOptions;
 import org.elasticsearch.inference.InferenceServiceResults;
+import org.elasticsearch.inference.InputType;
 import org.elasticsearch.inference.Model;
 import org.elasticsearch.inference.TaskType;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.threadpool.ThreadPool;
-import org.elasticsearch.xpack.inference.external.http.sender.HttpRequestSenderFactory;
+import org.elasticsearch.xpack.inference.external.http.sender.DocumentsOnlyInput;
+import org.elasticsearch.xpack.inference.external.http.sender.HttpRequestSender;
+import org.elasticsearch.xpack.inference.external.http.sender.InferenceInputs;
 import org.elasticsearch.xpack.inference.external.http.sender.Sender;
 import org.junit.After;
 import org.junit.Before;
@@ -25,12 +29,10 @@ import org.junit.Before;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import static org.elasticsearch.xpack.inference.external.http.Utils.inferenceUtilityPool;
+import static org.elasticsearch.xpack.inference.Utils.inferenceUtilityPool;
 import static org.elasticsearch.xpack.inference.services.ServiceComponentsTests.createWithEmptySettings;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -55,16 +57,16 @@ public class SenderServiceTests extends ESTestCase {
     public void testStart_InitializesTheSender() throws IOException {
         var sender = mock(Sender.class);
 
-        var factory = mock(HttpRequestSenderFactory.class);
-        when(factory.createSender(anyString())).thenReturn(sender);
+        var factory = mock(HttpRequestSender.Factory.class);
+        when(factory.createSender()).thenReturn(sender);
 
-        try (var service = new TestSenderService(new SetOnce<>(factory), new SetOnce<>(createWithEmptySettings(threadPool)))) {
+        try (var service = new TestSenderService(factory, createWithEmptySettings(threadPool))) {
             PlainActionFuture<Boolean> listener = new PlainActionFuture<>();
             service.start(mock(Model.class), listener);
 
             listener.actionGet(TIMEOUT);
             verify(sender, times(1)).start();
-            verify(factory, times(1)).createSender(anyString());
+            verify(factory, times(1)).createSender();
         }
 
         verify(sender, times(1)).close();
@@ -75,10 +77,10 @@ public class SenderServiceTests extends ESTestCase {
     public void testStart_CallingStartTwiceKeepsSameSenderReference() throws IOException {
         var sender = mock(Sender.class);
 
-        var factory = mock(HttpRequestSenderFactory.class);
-        when(factory.createSender(anyString())).thenReturn(sender);
+        var factory = mock(HttpRequestSender.Factory.class);
+        when(factory.createSender()).thenReturn(sender);
 
-        try (var service = new TestSenderService(new SetOnce<>(factory), new SetOnce<>(createWithEmptySettings(threadPool)))) {
+        try (var service = new TestSenderService(factory, createWithEmptySettings(threadPool))) {
             PlainActionFuture<Boolean> listener = new PlainActionFuture<>();
             service.start(mock(Model.class), listener);
             listener.actionGet(TIMEOUT);
@@ -86,7 +88,7 @@ public class SenderServiceTests extends ESTestCase {
             service.start(mock(Model.class), listener);
             listener.actionGet(TIMEOUT);
 
-            verify(factory, times(1)).createSender(anyString());
+            verify(factory, times(1)).createSender();
             verify(sender, times(2)).start();
         }
 
@@ -96,16 +98,31 @@ public class SenderServiceTests extends ESTestCase {
     }
 
     private static final class TestSenderService extends SenderService {
-        TestSenderService(SetOnce<HttpRequestSenderFactory> factory, SetOnce<ServiceComponents> serviceComponents) {
+        TestSenderService(HttpRequestSender.Factory factory, ServiceComponents serviceComponents) {
             super(factory, serviceComponents);
         }
 
         @Override
         protected void doInfer(
             Model model,
-            List<String> input,
+            InferenceInputs inputs,
             Map<String, Object> taskSettings,
+            InputType inputType,
+            TimeValue timeout,
             ActionListener<InferenceServiceResults> listener
+        ) {
+
+        }
+
+        @Override
+        protected void doChunkedInfer(
+            Model model,
+            DocumentsOnlyInput inputs,
+            Map<String, Object> taskSettings,
+            InputType inputType,
+            ChunkingOptions chunkingOptions,
+            TimeValue timeout,
+            ActionListener<List<ChunkedInferenceServiceResults>> listener
         ) {
 
         }
@@ -116,13 +133,18 @@ public class SenderServiceTests extends ESTestCase {
         }
 
         @Override
-        public Model parseRequestConfig(String modelId, TaskType taskType, Map<String, Object> config, Set<String> platfromArchitectures) {
-            return null;
+        public void parseRequestConfig(
+            String inferenceEntityId,
+            TaskType taskType,
+            Map<String, Object> config,
+            ActionListener<Model> parsedModelListener
+        ) {
+            parsedModelListener.onResponse(null);
         }
 
         @Override
         public Model parsePersistedConfigWithSecrets(
-            String modelId,
+            String inferenceEntityId,
             TaskType taskType,
             Map<String, Object> config,
             Map<String, Object> secrets
@@ -131,7 +153,7 @@ public class SenderServiceTests extends ESTestCase {
         }
 
         @Override
-        public Model parsePersistedConfig(String modelId, TaskType taskType, Map<String, Object> config) {
+        public Model parsePersistedConfig(String inferenceEntityId, TaskType taskType, Map<String, Object> config) {
             return null;
         }
 

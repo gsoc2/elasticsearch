@@ -28,6 +28,7 @@ import org.elasticsearch.xpack.core.ml.dataframe.DataFrameAnalyticsTaskState;
 import org.elasticsearch.xpack.core.ml.inference.assignment.RoutingInfo;
 import org.elasticsearch.xpack.core.ml.inference.assignment.RoutingState;
 import org.elasticsearch.xpack.core.ml.inference.assignment.TrainedModelAssignment;
+import org.elasticsearch.xpack.core.ml.inference.assignment.TrainedModelAssignmentMetadata;
 import org.elasticsearch.xpack.core.ml.job.config.JobState;
 import org.elasticsearch.xpack.core.ml.job.config.JobTaskState;
 import org.elasticsearch.xpack.core.ml.job.snapshot.upgrade.SnapshotUpgradeState;
@@ -35,7 +36,6 @@ import org.elasticsearch.xpack.core.ml.job.snapshot.upgrade.SnapshotUpgradeTaskP
 import org.elasticsearch.xpack.core.ml.job.snapshot.upgrade.SnapshotUpgradeTaskState;
 import org.elasticsearch.xpack.ml.datafeed.DatafeedRunner;
 import org.elasticsearch.xpack.ml.dataframe.DataFrameAnalyticsManager;
-import org.elasticsearch.xpack.ml.inference.assignment.TrainedModelAssignmentMetadata;
 import org.elasticsearch.xpack.ml.job.process.autodetect.AutodetectProcessManager;
 import org.elasticsearch.xpack.ml.process.MlController;
 import org.elasticsearch.xpack.ml.process.MlMemoryTracker;
@@ -191,7 +191,7 @@ public class MlLifeCycleServiceTests extends ESTestCase {
                         TrainedModelAssignmentMetadata.Builder.empty()
                             .addNewAssignment(
                                 "1",
-                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom())
+                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom(), null)
                                     .addRoutingEntry(nodeId, new RoutingInfo(1, 1, RoutingState.STARTING, ""))
                             )
                             .build()
@@ -215,12 +215,12 @@ public class MlLifeCycleServiceTests extends ESTestCase {
                         TrainedModelAssignmentMetadata.Builder.empty()
                             .addNewAssignment(
                                 "1",
-                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom())
+                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom(), null)
                                     .addRoutingEntry(nodeId, new RoutingInfo(1, 1, RoutingState.STOPPED, ""))
                             )
                             .addNewAssignment(
                                 "2",
-                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom())
+                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom(), null)
                                     .addRoutingEntry(nodeId, new RoutingInfo(1, 1, RoutingState.STOPPING, ""))
                             )
                             .build()
@@ -244,12 +244,12 @@ public class MlLifeCycleServiceTests extends ESTestCase {
                         TrainedModelAssignmentMetadata.Builder.empty()
                             .addNewAssignment(
                                 "1",
-                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom())
+                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom(), null)
                                     .addRoutingEntry(nodeId, new RoutingInfo(1, 1, RoutingState.STOPPED, ""))
                             )
                             .addNewAssignment(
                                 "2",
-                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom())
+                                TrainedModelAssignment.Builder.empty(StartTrainedModelDeploymentTaskParamsTests.createRandom(), null)
                                     .addRoutingEntry(nodeId, new RoutingInfo(1, 1, RoutingState.STOPPED, ""))
                             )
                             .build()

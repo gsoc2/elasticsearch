@@ -6,7 +6,6 @@
  */
 package org.elasticsearch.license;
 
-import org.elasticsearch.Version;
 import org.elasticsearch.cluster.ClusterModule;
 import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.metadata.RepositoriesMetadata;
@@ -126,7 +125,7 @@ public class LicensesMetadataSerializationTests extends ESTestCase {
         builder.startObject();
         builder.startObject("licenses");
         builder.nullField("license");
-        builder.field("trial_license", Version.CURRENT.toString());
+        builder.field("trial_license", TrialLicenseVersion.CURRENT);
         builder.endObject();
         builder.endObject();
         LicensesMetadata metadataFromXContent = getLicensesMetadataFromXContent(createParser(builder));

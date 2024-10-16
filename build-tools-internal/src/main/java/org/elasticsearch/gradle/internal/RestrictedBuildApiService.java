@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.gradle.internal;
@@ -71,7 +72,6 @@ public abstract class RestrictedBuildApiService implements BuildService<Restrict
         map.put(LegacyRestTestBasePlugin.class, ":test:external-modules:test-die-with-dignity");
         map.put(LegacyRestTestBasePlugin.class, ":test:external-modules:test-error-query");
         map.put(LegacyRestTestBasePlugin.class, ":test:external-modules:test-latency-simulating-directory");
-        map.put(LegacyRestTestBasePlugin.class, ":test:external-modules:test-seek-tracking-directory");
         map.put(LegacyRestTestBasePlugin.class, ":test:yaml-rest-runner");
         map.put(LegacyRestTestBasePlugin.class, ":distribution:archives:integ-test-zip");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:core");
@@ -123,10 +123,6 @@ public abstract class RestrictedBuildApiService implements BuildService<Restrict
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:eql:qa:ccs-rolling-upgrade");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:eql:qa:correctness");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:eql:qa:mixed-node");
-        map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:esql:qa:security");
-        map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:esql:qa:server:heap-attack");
-        map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:esql:qa:server:multi-node");
-        map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:esql:qa:server:single-node");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:fleet:qa:rest");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:identity-provider:qa:idp-rest-tests");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:ilm:qa:multi-cluster");
@@ -139,7 +135,6 @@ public abstract class RestrictedBuildApiService implements BuildService<Restrict
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:ml:qa:native-multi-node-tests");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:ml:qa:single-node-tests");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:searchable-snapshots:qa:hdfs");
-        map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:searchable-snapshots:qa:minio");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:searchable-snapshots:qa:rest");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:searchable-snapshots:qa:url");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:security:qa:tls-basic");
@@ -150,7 +145,6 @@ public abstract class RestrictedBuildApiService implements BuildService<Restrict
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:snapshot-based-recoveries:qa:fs");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:snapshot-based-recoveries:qa:license-enforcing");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:snapshot-repo-test-kit:qa:hdfs");
-        map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:snapshot-repo-test-kit:qa:minio");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:snapshot-repo-test-kit:qa:rest");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:sql:qa:jdbc:multi-node");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:sql:qa:jdbc:no-sql");
@@ -168,7 +162,6 @@ public abstract class RestrictedBuildApiService implements BuildService<Restrict
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:vector-tile:qa:multi-cluster");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:watcher:qa:rest");
         map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:watcher:qa:with-security");
-        map.put(LegacyRestTestBasePlugin.class, ":x-pack:plugin:esql:qa:server:mixed-cluster");
         return map;
     }
 

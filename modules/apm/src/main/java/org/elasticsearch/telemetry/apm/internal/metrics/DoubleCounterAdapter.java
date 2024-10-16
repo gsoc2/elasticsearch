@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.telemetry.apm.internal.metrics;
@@ -22,16 +23,7 @@ import java.util.Objects;
 public class DoubleCounterAdapter extends AbstractInstrument<DoubleCounter> implements org.elasticsearch.telemetry.metric.DoubleCounter {
 
     public DoubleCounterAdapter(Meter meter, String name, String description, String unit) {
-        super(meter, name, description, unit);
-    }
-
-    protected io.opentelemetry.api.metrics.DoubleCounter buildInstrument(Meter meter) {
-        return Objects.requireNonNull(meter)
-            .counterBuilder(getName())
-            .ofDoubles()
-            .setDescription(getDescription())
-            .setUnit(getUnit())
-            .build();
+        super(meter, new Builder(name, description, unit));
     }
 
     @Override
@@ -49,5 +41,16 @@ public class DoubleCounterAdapter extends AbstractInstrument<DoubleCounter> impl
     public void incrementBy(double inc, Map<String, Object> attributes) {
         assert inc >= 0;
         getInstrument().add(inc, OtelHelper.fromMap(attributes));
+    }
+
+    private static class Builder extends AbstractInstrument.Builder<DoubleCounter> {
+        private Builder(String name, String description, String unit) {
+            super(name, description, unit);
+        }
+
+        @Override
+        public DoubleCounter build(Meter meter) {
+            return Objects.requireNonNull(meter).counterBuilder(name).ofDoubles().setDescription(description).setUnit(unit).build();
+        }
     }
 }

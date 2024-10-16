@@ -14,27 +14,22 @@ import org.elasticsearch.common.Explicit;
 import org.elasticsearch.common.geo.GeometryFormatterFactory;
 import org.elasticsearch.common.geo.ShapeRelation;
 import org.elasticsearch.common.logging.DeprecationCategory;
-import org.elasticsearch.common.logging.DeprecationLogger;
 import org.elasticsearch.core.CheckedFunction;
 import org.elasticsearch.geometry.Geometry;
 import org.elasticsearch.geometry.Point;
 import org.elasticsearch.index.fielddata.FieldDataContext;
 import org.elasticsearch.index.fielddata.IndexFieldData;
 import org.elasticsearch.index.mapper.AbstractPointGeometryFieldMapper;
-import org.elasticsearch.index.mapper.BlockDocValuesReader;
-import org.elasticsearch.index.mapper.BlockLoader;
-import org.elasticsearch.index.mapper.BlockSourceReader;
 import org.elasticsearch.index.mapper.DocumentParserContext;
 import org.elasticsearch.index.mapper.FieldMapper;
-import org.elasticsearch.index.mapper.GeoShapeFieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.MapperBuilderContext;
 import org.elasticsearch.index.query.SearchExecutionContext;
+import org.elasticsearch.lucene.spatial.XYQueriesUtils;
 import org.elasticsearch.xcontent.XContentBuilder;
 import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xpack.spatial.common.CartesianPoint;
 import org.elasticsearch.xpack.spatial.index.fielddata.plain.CartesianPointIndexFieldData;
-import org.elasticsearch.xpack.spatial.index.query.ShapeQueryPointProcessor;
 import org.elasticsearch.xpack.spatial.script.field.CartesianPointDocValuesField;
 import org.elasticsearch.xpack.spatial.search.aggregations.support.CartesianPointValuesSourceType;
 
@@ -51,8 +46,6 @@ import java.util.function.Function;
  */
 public class PointFieldMapper extends AbstractPointGeometryFieldMapper<CartesianPoint> {
     public static final String CONTENT_TYPE = "point";
-
-    private static final DeprecationLogger DEPRECATION_LOGGER = DeprecationLogger.getLogger(GeoShapeFieldMapper.class);
 
     private static Builder builder(FieldMapper in) {
         return ((PointFieldMapper) in).builder;
@@ -108,14 +101,14 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
                 );
             }
             CartesianPointParser parser = new CartesianPointParser(
-                name,
+                leafName(),
                 p -> CartesianPoint.parsePoint(p, ignoreZValue.get().value()),
                 nullValue.get(),
                 ignoreZValue.get().value(),
                 ignoreMalformed.get().value()
             );
             PointFieldType ft = new PointFieldType(
-                context.buildFullName(name),
+                context.buildFullName(leafName()),
                 indexed.get(),
                 stored.get(),
                 hasDocValues.get(),
@@ -123,7 +116,7 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
                 nullValue.get(),
                 meta.get()
             );
-            return new PointFieldMapper(name, ft, multiFieldsBuilder.build(this, context), copyTo, parser, this);
+            return new PointFieldMapper(leafName(), ft, builderParams(this, context), parser, this);
         }
 
     }
@@ -135,19 +128,17 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
     public PointFieldMapper(
         String simpleName,
         MappedFieldType mappedFieldType,
-        MultiFields multiFields,
-        CopyTo copyTo,
+        BuilderParams builderParams,
         CartesianPointParser parser,
         Builder builder
     ) {
         super(
             simpleName,
             mappedFieldType,
-            multiFields,
+            builderParams,
             builder.ignoreMalformed.get(),
             builder.ignoreZValue.get(),
             builder.nullValue.get(),
-            copyTo,
             parser
         );
         this.builder = builder;
@@ -180,13 +171,10 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
 
     @Override
     public FieldMapper.Builder getMergeBuilder() {
-        return new Builder(simpleName(), builder.ignoreMalformed.getDefaultValue().value()).init(this);
+        return new Builder(leafName(), builder.ignoreMalformed.getDefaultValue().value()).init(this);
     }
 
-    public static class PointFieldType extends AbstractGeometryFieldType<CartesianPoint> implements ShapeQueryable {
-
-        private final ShapeQueryPointProcessor queryProcessor;
-        private final CartesianPoint nullValue;
+    public static class PointFieldType extends AbstractPointFieldType<CartesianPoint> implements ShapeQueryable {
 
         private PointFieldType(
             String name,
@@ -197,9 +185,7 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
             CartesianPoint nullValue,
             Map<String, String> meta
         ) {
-            super(name, indexed, stored, hasDocValues, parser, meta);
-            this.nullValue = nullValue;
-            this.queryProcessor = new ShapeQueryPointProcessor();
+            super(name, indexed, stored, hasDocValues, parser, nullValue, meta);
         }
 
         // only used in test
@@ -224,23 +210,13 @@ public class PointFieldMapper extends AbstractPointGeometryFieldMapper<Cartesian
 
         @Override
         public Query shapeQuery(Geometry shape, String fieldName, ShapeRelation relation, SearchExecutionContext context) {
-            return queryProcessor.shapeQuery(shape, fieldName, relation, context);
+            failIfNotIndexedNorDocValuesFallback(context);
+            return XYQueriesUtils.toXYPointQuery(shape, fieldName, relation, isIndexed(), hasDocValues());
         }
 
         @Override
         protected Function<List<CartesianPoint>, List<Object>> getFormatter(String format) {
             return GeometryFormatterFactory.getFormatter(format, p -> new Point(p.getX(), p.getY()));
-        }
-
-        @Override
-        public BlockLoader blockLoader(BlockLoaderContext blContext) {
-            if (hasDocValues()) {
-                return new BlockDocValuesReader.LongsBlockLoader(name());
-            }
-            // TODO: Currently we use longs in the compute engine and render to WKT in ESQL
-            return new BlockSourceReader.LongsBlockLoader(
-                valueFetcher(blContext.sourcePaths(name()), nullValue, GeometryFormatterFactory.WKT)
-            );
         }
     }
 

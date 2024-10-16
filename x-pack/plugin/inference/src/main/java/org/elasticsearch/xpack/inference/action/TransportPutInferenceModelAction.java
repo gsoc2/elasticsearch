@@ -19,15 +19,16 @@ import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.service.ClusterService;
-import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.settings.ClusterSettings;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.common.xcontent.XContentHelper;
+import org.elasticsearch.index.mapper.StrictDynamicMappingException;
 import org.elasticsearch.inference.InferenceService;
 import org.elasticsearch.inference.InferenceServiceRegistry;
 import org.elasticsearch.inference.Model;
 import org.elasticsearch.inference.ModelConfigurations;
 import org.elasticsearch.inference.TaskType;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
@@ -35,16 +36,20 @@ import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xcontent.XContentParser;
 import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.elasticsearch.xpack.core.inference.action.PutInferenceModelAction;
-import org.elasticsearch.xpack.core.ml.MachineLearningField;
-import org.elasticsearch.xpack.core.ml.utils.MlPlatformArchitecturesUtil;
+import org.elasticsearch.xpack.core.ml.inference.assignment.TrainedModelAssignmentUtils;
+import org.elasticsearch.xpack.core.ml.job.messages.Messages;
+import org.elasticsearch.xpack.core.ml.utils.ExceptionsHelper;
 import org.elasticsearch.xpack.inference.InferencePlugin;
 import org.elasticsearch.xpack.inference.registry.ModelRegistry;
+import org.elasticsearch.xpack.inference.services.ServiceUtils;
+import org.elasticsearch.xpack.inference.services.elasticsearch.ElasticsearchInternalService;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static org.elasticsearch.core.Strings.format;
+import static org.elasticsearch.xpack.inference.services.elasticsearch.ElasticsearchInternalService.OLD_ELSER_SERVICE_NAME;
 
 public class TransportPutInferenceModelAction extends TransportMasterNodeAction<
     PutInferenceModelAction.Request,
@@ -55,6 +60,7 @@ public class TransportPutInferenceModelAction extends TransportMasterNodeAction<
     private final ModelRegistry modelRegistry;
     private final InferenceServiceRegistry serviceRegistry;
     private final Client client;
+    private volatile boolean skipValidationAndStart;
 
     @Inject
     public TransportPutInferenceModelAction(
@@ -65,7 +71,8 @@ public class TransportPutInferenceModelAction extends TransportMasterNodeAction<
         IndexNameExpressionResolver indexNameExpressionResolver,
         ModelRegistry modelRegistry,
         InferenceServiceRegistry serviceRegistry,
-        Client client
+        Client client,
+        Settings settings
     ) {
         super(
             PutInferenceModelAction.NAME,
@@ -81,6 +88,9 @@ public class TransportPutInferenceModelAction extends TransportMasterNodeAction<
         this.modelRegistry = modelRegistry;
         this.serviceRegistry = serviceRegistry;
         this.client = client;
+        this.skipValidationAndStart = InferencePlugin.SKIP_VALIDATE_AND_START.get(settings);
+        clusterService.getClusterSettings()
+            .addSettingsUpdateConsumer(InferencePlugin.SKIP_VALIDATE_AND_START, this::setSkipValidationAndStart);
     }
 
     @Override
@@ -90,14 +100,24 @@ public class TransportPutInferenceModelAction extends TransportMasterNodeAction<
         ClusterState state,
         ActionListener<PutInferenceModelAction.Response> listener
     ) throws Exception {
-
         var requestAsMap = requestToMap(request);
+        var resolvedTaskType = ServiceUtils.resolveTaskType(request.getTaskType(), (String) requestAsMap.remove(TaskType.NAME));
+
         String serviceName = (String) requestAsMap.remove(ModelConfigurations.SERVICE);
         if (serviceName == null) {
-            listener.onFailure(new ElasticsearchStatusException("Model configuration is missing a service", RestStatus.BAD_REQUEST));
+            listener.onFailure(
+                new ElasticsearchStatusException(
+                    "Inference endpoint configuration is missing the [" + ModelConfigurations.SERVICE + "] setting",
+                    RestStatus.BAD_REQUEST
+                )
+            );
             return;
         }
 
+        if (List.of(OLD_ELSER_SERVICE_NAME, ElasticsearchInternalService.NAME).contains(serviceName)) {
+            // required for BWC of elser service in elasticsearch service TODO remove when elser service deprecated
+            requestAsMap.put(ModelConfigurations.SERVICE, serviceName);
+        }
         var service = serviceRegistry.getService(serviceName);
         if (service.isEmpty()) {
             listener.onFailure(new ElasticsearchStatusException("Unknown service [{}]", RestStatus.BAD_REQUEST, serviceName));
@@ -128,52 +148,63 @@ public class TransportPutInferenceModelAction extends TransportMasterNodeAction<
             return;
         }
 
-        if (service.get().isInClusterService()) {
-            // Find the cluster platform as the service may need that
-            // information when creating the model
-            MlPlatformArchitecturesUtil.getMlNodesArchitecturesSet(ActionListener.wrap(architectures -> {
-                if (architectures.isEmpty() && clusterIsInElasticCloud(clusterService.getClusterSettings())) {
-                    parseAndStoreModel(
-                        service.get(),
-                        request.getModelId(),
-                        request.getTaskType(),
-                        requestAsMap,
-                        // In Elastic cloud ml nodes run on Linux x86
-                        Set.of("linux-x86_64"),
-                        listener
-                    );
-                } else {
-                    // The architecture field could be an empty set, the individual services will need to handle that
-                    parseAndStoreModel(service.get(), request.getModelId(), request.getTaskType(), requestAsMap, architectures, listener);
-                }
-            }, listener::onFailure), client, threadPool.executor(InferencePlugin.UTILITY_THREAD_POOL_NAME));
-        } else {
-            // Not an in cluster service, it does not care about the cluster platform
-            parseAndStoreModel(service.get(), request.getModelId(), request.getTaskType(), requestAsMap, Set.of(), listener);
+        var assignments = TrainedModelAssignmentUtils.modelAssignments(request.getInferenceEntityId(), clusterService.state());
+        if ((assignments == null || assignments.isEmpty()) == false) {
+            listener.onFailure(
+                ExceptionsHelper.badRequestException(
+                    Messages.MODEL_ID_MATCHES_EXISTING_MODEL_IDS_BUT_MUST_NOT,
+                    request.getInferenceEntityId()
+                )
+            );
+            return;
         }
+
+        parseAndStoreModel(service.get(), request.getInferenceEntityId(), resolvedTaskType, requestAsMap, listener);
     }
 
     private void parseAndStoreModel(
         InferenceService service,
-        String modelId,
+        String inferenceEntityId,
         TaskType taskType,
         Map<String, Object> config,
-        Set<String> platformArchitectures,
         ActionListener<PutInferenceModelAction.Response> listener
     ) {
-        var model = service.parseRequestConfig(modelId, taskType, config, platformArchitectures);
-        // model is valid good to persist then start
-        this.modelRegistry.storeModel(model, ActionListener.wrap(r -> { startModel(service, model, listener); }, listener::onFailure));
-    }
-
-    private static void startModel(InferenceService service, Model model, ActionListener<PutInferenceModelAction.Response> listener) {
-        service.start(
-            model,
-            ActionListener.wrap(
-                ok -> listener.onResponse(new PutInferenceModelAction.Response(model.getConfigurations())),
-                listener::onFailure
+        ActionListener<Model> storeModelListener = listener.delegateFailureAndWrap(
+            (delegate, verifiedModel) -> modelRegistry.storeModel(
+                verifiedModel,
+                ActionListener.wrap(r -> startInferenceEndpoint(service, verifiedModel, delegate), e -> {
+                    if (e.getCause() instanceof StrictDynamicMappingException && e.getCause().getMessage().contains("chunking_settings")) {
+                        delegate.onFailure(
+                            new ElasticsearchStatusException(
+                                "One or more nodes in your cluster does not support chunking_settings. "
+                                    + "Please update all nodes in your cluster to the latest version to use chunking_settings.",
+                                RestStatus.BAD_REQUEST
+                            )
+                        );
+                    } else {
+                        delegate.onFailure(e);
+                    }
+                })
             )
         );
+
+        ActionListener<Model> parsedModelListener = listener.delegateFailureAndWrap((delegate, model) -> {
+            if (skipValidationAndStart) {
+                storeModelListener.onResponse(model);
+            } else {
+                service.checkModelConfig(model, storeModelListener);
+            }
+        });
+
+        service.parseRequestConfig(inferenceEntityId, taskType, config, parsedModelListener);
+    }
+
+    private void startInferenceEndpoint(InferenceService service, Model model, ActionListener<PutInferenceModelAction.Response> listener) {
+        if (skipValidationAndStart) {
+            listener.onResponse(new PutInferenceModelAction.Response(model.getConfigurations()));
+        } else {
+            service.start(model, listener.map(started -> new PutInferenceModelAction.Response(model.getConfigurations())));
+        }
     }
 
     private Map<String, Object> requestToMap(PutInferenceModelAction.Request request) throws IOException {
@@ -188,14 +219,13 @@ public class TransportPutInferenceModelAction extends TransportMasterNodeAction<
         }
     }
 
+    private void setSkipValidationAndStart(boolean skipValidationAndStart) {
+        this.skipValidationAndStart = skipValidationAndStart;
+    }
+
     @Override
     protected ClusterBlockException checkBlock(PutInferenceModelAction.Request request, ClusterState state) {
         return state.blocks().globalBlockedException(ClusterBlockLevel.METADATA_WRITE);
     }
 
-    static boolean clusterIsInElasticCloud(ClusterSettings settings) {
-        // use a heuristic to determine if in Elastic cloud.
-        // One such heuristic is where USE_AUTO_MACHINE_MEMORY_PERCENT == true
-        return settings.get(MachineLearningField.USE_AUTO_MACHINE_MEMORY_PERCENT);
-    }
 }

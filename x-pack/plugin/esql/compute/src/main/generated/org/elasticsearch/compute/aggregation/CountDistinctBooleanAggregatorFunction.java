@@ -53,18 +53,43 @@ public final class CountDistinctBooleanAggregatorFunction implements AggregatorF
   }
 
   @Override
-  public void addRawInput(Page page) {
+  public void addRawInput(Page page, BooleanVector mask) {
+    if (mask.allFalse()) {
+      // Entire page masked away
+      return;
+    }
+    if (mask.allTrue()) {
+      // No masking
+      BooleanBlock block = page.getBlock(channels.get(0));
+      BooleanVector vector = block.asVector();
+      if (vector != null) {
+        addRawVector(vector);
+      } else {
+        addRawBlock(block);
+      }
+      return;
+    }
+    // Some positions masked away, others kept
     BooleanBlock block = page.getBlock(channels.get(0));
     BooleanVector vector = block.asVector();
     if (vector != null) {
-      addRawVector(vector);
+      addRawVector(vector, mask);
     } else {
-      addRawBlock(block);
+      addRawBlock(block, mask);
     }
   }
 
   private void addRawVector(BooleanVector vector) {
     for (int i = 0; i < vector.getPositionCount(); i++) {
+      CountDistinctBooleanAggregator.combine(state, vector.getBoolean(i));
+    }
+  }
+
+  private void addRawVector(BooleanVector vector, BooleanVector mask) {
+    for (int i = 0; i < vector.getPositionCount(); i++) {
+      if (mask.getBoolean(i) == false) {
+        continue;
+      }
       CountDistinctBooleanAggregator.combine(state, vector.getBoolean(i));
     }
   }
@@ -82,18 +107,38 @@ public final class CountDistinctBooleanAggregatorFunction implements AggregatorF
     }
   }
 
+  private void addRawBlock(BooleanBlock block, BooleanVector mask) {
+    for (int p = 0; p < block.getPositionCount(); p++) {
+      if (mask.getBoolean(p) == false) {
+        continue;
+      }
+      if (block.isNull(p)) {
+        continue;
+      }
+      int start = block.getFirstValueIndex(p);
+      int end = start + block.getValueCount(p);
+      for (int i = start; i < end; i++) {
+        CountDistinctBooleanAggregator.combine(state, block.getBoolean(i));
+      }
+    }
+  }
+
   @Override
   public void addIntermediateInput(Page page) {
     assert channels.size() == intermediateBlockCount();
     assert page.getBlockCount() >= channels.get(0) + intermediateStateDesc().size();
-    Block uncastBlock = page.getBlock(channels.get(0));
-    if (uncastBlock.areAllValuesNull()) {
+    Block fbitUncast = page.getBlock(channels.get(0));
+    if (fbitUncast.areAllValuesNull()) {
       return;
     }
-    BooleanVector fbit = page.<BooleanBlock>getBlock(channels.get(0)).asVector();
-    BooleanVector tbit = page.<BooleanBlock>getBlock(channels.get(1)).asVector();
+    BooleanVector fbit = ((BooleanBlock) fbitUncast).asVector();
     assert fbit.getPositionCount() == 1;
-    assert fbit.getPositionCount() == tbit.getPositionCount();
+    Block tbitUncast = page.getBlock(channels.get(1));
+    if (tbitUncast.areAllValuesNull()) {
+      return;
+    }
+    BooleanVector tbit = ((BooleanBlock) tbitUncast).asVector();
+    assert tbit.getPositionCount() == 1;
     CountDistinctBooleanAggregator.combineIntermediate(state, fbit.getBoolean(0), tbit.getBoolean(0));
   }
 

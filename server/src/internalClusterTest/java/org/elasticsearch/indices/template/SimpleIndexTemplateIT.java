@@ -1,18 +1,19 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.indices.template;
 
+import org.elasticsearch.action.ActionRequestBuilder;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.admin.indices.alias.Alias;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesResponse;
 import org.elasticsearch.action.admin.indices.settings.get.GetSettingsResponse;
 import org.elasticsearch.action.admin.indices.template.get.GetIndexTemplatesResponse;
-import org.elasticsearch.action.admin.indices.template.put.PutIndexTemplateRequestBuilder;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.fieldcaps.FieldCapabilities;
 import org.elasticsearch.action.fieldcaps.FieldCapabilitiesResponse;
@@ -123,27 +124,25 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
             .get();
 
         // test create param
-        assertRequestBuilderThrows(
-            indicesAdmin().preparePutTemplate("template_2")
-                .setPatterns(Collections.singletonList("test*"))
-                .setSettings(indexSettings())
-                .setCreate(true)
-                .setOrder(1)
-                .setMapping(
-                    XContentFactory.jsonBuilder()
-                        .startObject()
-                        .startObject("_doc")
-                        .startObject("properties")
-                        .startObject("field2")
-                        .field("type", "text")
-                        .field("store", false)
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                ),
-            IllegalArgumentException.class
-        );
+        ActionRequestBuilder<?, ?> builder = indicesAdmin().preparePutTemplate("template_2")
+            .setPatterns(Collections.singletonList("test*"))
+            .setSettings(indexSettings())
+            .setCreate(true)
+            .setOrder(1)
+            .setMapping(
+                XContentFactory.jsonBuilder()
+                    .startObject()
+                    .startObject("_doc")
+                    .startObject("properties")
+                    .startObject("field2")
+                    .field("type", "text")
+                    .field("store", false)
+                    .endObject()
+                    .endObject()
+                    .endObject()
+                    .endObject()
+            );
+        expectThrows(IllegalArgumentException.class, builder);
 
         response = indicesAdmin().prepareGetTemplates().get();
         assertThat(response.getIndexTemplates(), hasSize(2));
@@ -180,7 +179,7 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
     }
 
     public void testDeleteIndexTemplate() throws Exception {
-        final int existingTemplates = admin().cluster().prepareState().get().getState().metadata().templates().size();
+        final int existingTemplates = admin().cluster().prepareState(TEST_REQUEST_TIMEOUT).get().getState().metadata().templates().size();
         logger.info("--> put template_1 and template_2");
         indicesAdmin().preparePutTemplate("template_1")
             .setPatterns(Collections.singletonList("te*"))
@@ -225,7 +224,7 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
         logger.info("--> explicitly delete template_1");
         indicesAdmin().prepareDeleteTemplate("template_1").get();
 
-        ClusterState state = admin().cluster().prepareState().get().getState();
+        ClusterState state = admin().cluster().prepareState(TEST_REQUEST_TIMEOUT).get().getState();
 
         assertThat(state.metadata().templates().size(), equalTo(1 + existingTemplates));
         assertThat(state.metadata().templates().containsKey("template_2"), equalTo(true));
@@ -256,11 +255,14 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
 
         logger.info("--> delete template*");
         indicesAdmin().prepareDeleteTemplate("template*").get();
-        assertThat(admin().cluster().prepareState().get().getState().metadata().templates().size(), equalTo(existingTemplates));
+        assertThat(
+            admin().cluster().prepareState(TEST_REQUEST_TIMEOUT).get().getState().metadata().templates().size(),
+            equalTo(existingTemplates)
+        );
 
         logger.info("--> delete * with no templates, make sure we don't get a failure");
         indicesAdmin().prepareDeleteTemplate("*").get();
-        assertThat(admin().cluster().prepareState().get().getState().metadata().templates().size(), equalTo(0));
+        assertThat(admin().cluster().prepareState(TEST_REQUEST_TIMEOUT).get().getState().metadata().templates().size(), equalTo(0));
     }
 
     public void testThatGetIndexTemplatesWorks() throws Exception {
@@ -432,10 +434,9 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
 
         MapperParsingException e = expectThrows(
             MapperParsingException.class,
-            () -> indicesAdmin().preparePutTemplate("template_1")
+            indicesAdmin().preparePutTemplate("template_1")
                 .setPatterns(Collections.singletonList("te*"))
                 .setMapping("{\"foo\": \"abcde\"}", XContentType.JSON)
-                .get()
         );
         assertThat(e.getMessage(), containsString("Failed to parse mapping"));
 
@@ -453,10 +454,9 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
 
         IllegalArgumentException e = expectThrows(
             IllegalArgumentException.class,
-            () -> indicesAdmin().preparePutTemplate("template_1")
+            indicesAdmin().preparePutTemplate("template_1")
                 .setPatterns(Collections.singletonList("te*"))
                 .setSettings(Settings.builder().put("does_not_exist", "test"))
-                .get()
         );
         assertEquals(
             "unknown setting [index.does_not_exist] please check that any required plugins are"
@@ -625,11 +625,12 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
 
     public void testAliasInvalidFilterInvalidJson() throws Exception {
         // invalid json: put index template fails
-        PutIndexTemplateRequestBuilder putIndexTemplateRequestBuilder = indicesAdmin().preparePutTemplate("template_1")
-            .setPatterns(Collections.singletonList("te*"))
-            .addAlias(new Alias("invalid_alias").filter("abcde"));
-
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> putIndexTemplateRequestBuilder.get());
+        IllegalArgumentException e = expectThrows(
+            IllegalArgumentException.class,
+            indicesAdmin().preparePutTemplate("template_1")
+                .setPatterns(Collections.singletonList("te*"))
+                .addAlias(new Alias("invalid_alias").filter("abcde"))
+        );
         assertThat(e.getMessage(), equalTo("failed to parse filter for alias [invalid_alias]"));
 
         GetIndexTemplatesResponse response = indicesAdmin().prepareGetTemplates("template_1").get();
@@ -646,20 +647,22 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
     }
 
     public void testAliasEmptyName() throws Exception {
-        PutIndexTemplateRequestBuilder putIndexTemplateRequestBuilder = indicesAdmin().preparePutTemplate("template_1")
-            .setPatterns(Collections.singletonList("te*"))
-            .addAlias(new Alias("  ").indexRouting("1,2,3"));
-
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> putIndexTemplateRequestBuilder.get());
+        IllegalArgumentException e = expectThrows(
+            IllegalArgumentException.class,
+            indicesAdmin().preparePutTemplate("template_1")
+                .setPatterns(Collections.singletonList("te*"))
+                .addAlias(new Alias("  ").indexRouting("1,2,3"))
+        );
         assertThat(e.getMessage(), equalTo("alias name is required"));
     }
 
     public void testAliasWithMultipleIndexRoutings() throws Exception {
-        PutIndexTemplateRequestBuilder putIndexTemplateRequestBuilder = indicesAdmin().preparePutTemplate("template_1")
-            .setPatterns(Collections.singletonList("te*"))
-            .addAlias(new Alias("alias").indexRouting("1,2,3"));
-
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> putIndexTemplateRequestBuilder.get());
+        IllegalArgumentException e = expectThrows(
+            IllegalArgumentException.class,
+            indicesAdmin().preparePutTemplate("template_1")
+                .setPatterns(Collections.singletonList("te*"))
+                .addAlias(new Alias("alias").indexRouting("1,2,3"))
+        );
         assertThat(e.getMessage(), equalTo("alias [alias] has several index routing values associated with it"));
     }
 
@@ -684,7 +687,7 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
 
         ensureGreen();
 
-        GetAliasesResponse getAliasesResponse = indicesAdmin().prepareGetAliases().addIndices("test").get();
+        GetAliasesResponse getAliasesResponse = indicesAdmin().prepareGetAliases().setIndices("test").get();
         assertThat(getAliasesResponse.getAliases().get("test").size(), equalTo(4));
 
         for (AliasMetadata aliasMetadata : getAliasesResponse.getAliases().get("test")) {
@@ -768,7 +771,7 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
         // put template using custom_1 analyzer
         MapperParsingException e = expectThrows(
             MapperParsingException.class,
-            () -> indicesAdmin().preparePutTemplate("template_2")
+            indicesAdmin().preparePutTemplate("template_2")
                 .setPatterns(Collections.singletonList("test*"))
                 .setCreate(true)
                 .setOrder(1)
@@ -785,7 +788,6 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
                         .endObject()
                         .endObject()
                 )
-                .get()
         );
         assertThat(e.getMessage(), containsString("analyzer [custom_1] has not been configured in mappings"));
 
@@ -873,24 +875,22 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
         // provide more partitions than shards
         IllegalArgumentException eBadSettings = expectThrows(
             IllegalArgumentException.class,
-            () -> indicesAdmin().preparePutTemplate("template_1")
+            indicesAdmin().preparePutTemplate("template_1")
                 .setPatterns(Collections.singletonList("te*"))
                 .setSettings(Settings.builder().put("index.number_of_shards", "5").put("index.routing_partition_size", "6"))
-                .get()
         );
         assertThat(
             eBadSettings.getMessage(),
-            containsString("partition size [6] should be a positive number less than the number of shards [5]")
+            containsString("partition size [6] should be a positive number less than the number of routing shards [5]")
         );
 
         // provide an invalid mapping for a partitioned index
         IllegalArgumentException eBadMapping = expectThrows(
             IllegalArgumentException.class,
-            () -> indicesAdmin().preparePutTemplate("template_2")
+            indicesAdmin().preparePutTemplate("template_2")
                 .setPatterns(Collections.singletonList("te*"))
                 .setMapping("{\"_doc\":{\"_routing\":{\"required\":false}}}", XContentType.JSON)
                 .setSettings(Settings.builder().put("index.number_of_shards", "6").put("index.routing_partition_size", "3"))
-                .get()
         );
         assertThat(eBadMapping.getMessage(), containsString("must have routing required for partitioned index"));
 
@@ -908,13 +908,12 @@ public class SimpleIndexTemplateIT extends ESIntegTestCase {
         // create an index with too few shards
         IllegalArgumentException eBadIndex = expectThrows(
             IllegalArgumentException.class,
-            () -> prepareCreate("test_bad", Settings.builder().put("index.number_of_shards", 5).put("index.number_of_routing_shards", 5))
-                .get()
+            prepareCreate("test_bad", Settings.builder().put("index.number_of_shards", 5).put("index.number_of_routing_shards", 5))
         );
 
         assertThat(
             eBadIndex.getMessage(),
-            containsString("partition size [6] should be a positive number less than the number of shards [5]")
+            containsString("partition size [6] should be a positive number less than the number of routing shards [5]")
         );
 
         // finally, create a valid index

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.indices.stats;
@@ -13,7 +14,6 @@ import org.elasticsearch.action.ActionFuture;
 import org.elasticsearch.action.DocWriteResponse;
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
-import org.elasticsearch.action.admin.indices.forcemerge.ForceMergeResponse;
 import org.elasticsearch.action.admin.indices.stats.CommonStats;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags.Flag;
@@ -31,6 +31,7 @@ import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchType;
 import org.elasticsearch.action.support.DefaultShardOperationFailedException;
 import org.elasticsearch.action.support.WriteRequest;
+import org.elasticsearch.action.support.broadcast.BroadcastResponse;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
@@ -82,6 +83,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.elasticsearch.cluster.metadata.IndexMetadata.SETTING_NUMBER_OF_REPLICAS;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAllSuccessful;
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoFailures;
 import static org.elasticsearch.xcontent.XContentFactory.jsonBuilder;
 import static org.hamcrest.Matchers.emptyCollectionOf;
@@ -150,8 +152,8 @@ public class IndexStatsIT extends ESIntegTestCase {
         assertThat(indicesStats.getTotal().getFieldData().getMemorySizeInBytes(), equalTo(0L));
 
         // sort to load it to field data...
-        prepareSearch().addSort("field", SortOrder.ASC).get();
-        prepareSearch().addSort("field", SortOrder.ASC).get();
+        prepareSearch().addSort("field", SortOrder.ASC).get().decRef();
+        prepareSearch().addSort("field", SortOrder.ASC).get().decRef();
 
         nodesStats = clusterAdmin().prepareNodesStats("data:true").setIndices(true).get();
         assertThat(
@@ -166,8 +168,8 @@ public class IndexStatsIT extends ESIntegTestCase {
         assertThat(indicesStats.getTotal().getFieldData().getMemorySizeInBytes(), greaterThan(0L));
 
         // sort to load it to field data...
-        prepareSearch().addSort("field2", SortOrder.ASC).get();
-        prepareSearch().addSort("field2", SortOrder.ASC).get();
+        prepareSearch().addSort("field2", SortOrder.ASC).get().decRef();
+        prepareSearch().addSort("field2", SortOrder.ASC).get().decRef();
 
         // now check the per field stats
         nodesStats = clusterAdmin().prepareNodesStats("data:true")
@@ -236,7 +238,7 @@ public class IndexStatsIT extends ESIntegTestCase {
                 .setMapping("field", "type=text,fielddata=true")
         );
         ensureGreen();
-        clusterAdmin().prepareHealth().setWaitForGreenStatus().get();
+        clusterAdmin().prepareHealth(TEST_REQUEST_TIMEOUT).setWaitForGreenStatus().get();
         prepareIndex("test").setId("1").setSource("field", "value1").get();
         prepareIndex("test").setId("2").setSource("field", "value2").get();
         indicesAdmin().prepareRefresh().get();
@@ -264,8 +266,8 @@ public class IndexStatsIT extends ESIntegTestCase {
         assertThat(indicesStats.getTotal().getQueryCache().getMemorySizeInBytes(), equalTo(0L));
 
         // sort to load it to field data and filter to load filter cache
-        prepareSearch().setPostFilter(QueryBuilders.termQuery("field", "value1")).addSort("field", SortOrder.ASC).get();
-        prepareSearch().setPostFilter(QueryBuilders.termQuery("field", "value2")).addSort("field", SortOrder.ASC).get();
+        prepareSearch().setPostFilter(QueryBuilders.termQuery("field", "value1")).addSort("field", SortOrder.ASC).get().decRef();
+        prepareSearch().setPostFilter(QueryBuilders.termQuery("field", "value2")).addSort("field", SortOrder.ASC).get().decRef();
 
         nodesStats = clusterAdmin().prepareNodesStats("data:true").setIndices(true).get();
         assertThat(
@@ -355,10 +357,7 @@ public class IndexStatsIT extends ESIntegTestCase {
         assertThat(indicesAdmin().prepareStats("idx").setRequestCache(true).get().getTotal().getRequestCache().getHitCount(), equalTo(0L));
         assertThat(indicesAdmin().prepareStats("idx").setRequestCache(true).get().getTotal().getRequestCache().getMissCount(), equalTo(0L));
         for (int i = 0; i < 10; i++) {
-            assertThat(
-                prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0).get().getHits().getTotalHits().value,
-                equalTo((long) numDocs)
-            );
+            assertHitCount(prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0), numDocs);
             assertThat(
                 indicesAdmin().prepareStats("idx").setRequestCache(true).get().getTotal().getRequestCache().getMemorySizeInBytes(),
                 greaterThan(0L)
@@ -389,10 +388,7 @@ public class IndexStatsIT extends ESIntegTestCase {
         });
 
         for (int i = 0; i < 10; i++) {
-            assertThat(
-                prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0).get().getHits().getTotalHits().value,
-                equalTo((long) numDocs)
-            );
+            assertHitCount(prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0), numDocs);
             assertThat(
                 indicesAdmin().prepareStats("idx").setRequestCache(true).get().getTotal().getRequestCache().getMemorySizeInBytes(),
                 greaterThan(0L)
@@ -407,29 +403,13 @@ public class IndexStatsIT extends ESIntegTestCase {
 
         // test explicit request parameter
 
-        assertThat(
-            prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH)
-                .setSize(0)
-                .setRequestCache(false)
-                .get()
-                .getHits()
-                .getTotalHits().value,
-            equalTo((long) numDocs)
-        );
+        assertHitCount(prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0).setRequestCache(false), numDocs);
         assertThat(
             indicesAdmin().prepareStats("idx").setRequestCache(true).get().getTotal().getRequestCache().getMemorySizeInBytes(),
             equalTo(0L)
         );
 
-        assertThat(
-            prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH)
-                .setSize(0)
-                .setRequestCache(true)
-                .get()
-                .getHits()
-                .getTotalHits().value,
-            equalTo((long) numDocs)
-        );
+        assertHitCount(prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0).setRequestCache(true), numDocs);
         assertThat(
             indicesAdmin().prepareStats("idx").setRequestCache(true).get().getTotal().getRequestCache().getMemorySizeInBytes(),
             greaterThan(0L)
@@ -440,24 +420,13 @@ public class IndexStatsIT extends ESIntegTestCase {
         indicesAdmin().prepareClearCache().setRequestCache(true).get(); // clean the cache
         updateIndexSettings(Settings.builder().put(IndicesRequestCache.INDEX_CACHE_REQUEST_ENABLED_SETTING.getKey(), false), "idx");
 
-        assertThat(
-            prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0).get().getHits().getTotalHits().value,
-            equalTo((long) numDocs)
-        );
+        assertHitCount(prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0), numDocs);
         assertThat(
             indicesAdmin().prepareStats("idx").setRequestCache(true).get().getTotal().getRequestCache().getMemorySizeInBytes(),
             equalTo(0L)
         );
 
-        assertThat(
-            prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH)
-                .setSize(0)
-                .setRequestCache(true)
-                .get()
-                .getHits()
-                .getTotalHits().value,
-            equalTo((long) numDocs)
-        );
+        assertHitCount(prepareSearch("idx").setSearchType(SearchType.QUERY_THEN_FETCH).setSize(0).setRequestCache(true), numDocs);
         assertThat(
             indicesAdmin().prepareStats("idx").setRequestCache(true).get().getTotal().getRequestCache().getMemorySizeInBytes(),
             greaterThan(0L)
@@ -866,7 +835,8 @@ public class IndexStatsIT extends ESIntegTestCase {
             Flag.Bulk,
             Flag.Shards,
             Flag.Mappings,
-            Flag.DenseVector };
+            Flag.DenseVector,
+            Flag.SparseVector };
 
         assertThat(flags.length, equalTo(Flag.values().length));
         for (int i = 0; i < flags.length; i++) {
@@ -983,7 +953,7 @@ public class IndexStatsIT extends ESIntegTestCase {
         prepareIndex("test1").setId(Integer.toString(1)).setSource("foo", "bar").get();
         refresh();
 
-        prepareSearch("_all").setStats("bar", "baz").get();
+        prepareSearch("_all").setStats("bar", "baz").get().decRef();
 
         IndicesStatsRequestBuilder builder = indicesAdmin().prepareStats();
         IndicesStatsResponse stats = builder.get();
@@ -1032,6 +1002,7 @@ public class IndexStatsIT extends ESIntegTestCase {
                 // We don't actually expose shards in IndexStats, but this test fails if it isn't handled
                 builder.request().flags().set(Flag.Shards, set);
             case DenseVector -> builder.setDenseVector(set);
+            case SparseVector -> builder.setSparseVector(set);
             default -> fail("new flag? " + flag);
         }
     }
@@ -1078,6 +1049,8 @@ public class IndexStatsIT extends ESIntegTestCase {
                 return response.getNodeMappings() != null;
             case DenseVector:
                 return response.getDenseVectorStats() != null;
+            case SparseVector:
+                return response.getSparseVectorStats() != null;
             default:
                 fail("new flag? " + flag);
                 return false;
@@ -1170,7 +1143,7 @@ public class IndexStatsIT extends ESIntegTestCase {
         });
         flush("index");
         logger.info("--> force merging to a single segment");
-        ForceMergeResponse forceMergeResponse = indicesAdmin().prepareForceMerge("index").setFlush(true).setMaxNumSegments(1).get();
+        BroadcastResponse forceMergeResponse = indicesAdmin().prepareForceMerge("index").setFlush(true).setMaxNumSegments(1).get();
         assertAllSuccessful(forceMergeResponse);
         logger.info("--> refreshing");
         refresh();

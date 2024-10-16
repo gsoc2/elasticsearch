@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.search.aggregations.bucket.composite;
@@ -21,6 +22,7 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.FieldComparator;
 import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.LeafFieldComparator;
+import org.apache.lucene.search.Pruning;
 import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.Sort;
@@ -190,19 +192,19 @@ public final class CompositeAggregator extends BucketsAggregator implements Size
             runDeferredCollections();
         }
 
-        int num = Math.min(size, queue.size());
+        int num = Math.min(size, (int) queue.size());
         final InternalComposite.InternalBucket[] buckets = new InternalComposite.InternalBucket[num];
-        long[] bucketOrdsToCollect = new long[queue.size()];
+        long[] bucketOrdsToCollect = new long[(int) queue.size()];
         for (int i = 0; i < queue.size(); i++) {
             bucketOrdsToCollect[i] = i;
         }
-        InternalAggregations[] subAggsForBuckets = buildSubAggsForBuckets(bucketOrdsToCollect);
+        var subAggsForBuckets = buildSubAggsForBuckets(bucketOrdsToCollect);
         while (queue.size() > 0) {
             int slot = queue.pop();
             CompositeKey key = queue.toCompositeKey(slot);
-            InternalAggregations aggs = subAggsForBuckets[slot];
+            InternalAggregations aggs = subAggsForBuckets.apply(slot);
             long docCount = queue.getDocCount(slot);
-            buckets[queue.size()] = new InternalComposite.InternalBucket(
+            buckets[(int) queue.size()] = new InternalComposite.InternalBucket(
                 sourceNames,
                 formats,
                 key,
@@ -356,8 +358,8 @@ public final class CompositeAggregator extends BucketsAggregator implements Size
                     }
 
                     @Override
-                    public FieldComparator<?> getComparator(int numHits, boolean enableSkipping) {
-                        return new LongComparator(1, delegate.getField(), (Long) missingValue, delegate.getReverse(), false) {
+                    public FieldComparator<?> getComparator(int numHits, Pruning enableSkipping) {
+                        return new LongComparator(1, delegate.getField(), (Long) missingValue, delegate.getReverse(), Pruning.NONE) {
                             @Override
                             public LeafFieldComparator getLeafComparator(LeafReaderContext context) throws IOException {
                                 return new LongLeafComparator(context) {

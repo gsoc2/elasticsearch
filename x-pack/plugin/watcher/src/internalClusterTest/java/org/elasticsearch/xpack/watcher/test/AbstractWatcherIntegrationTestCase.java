@@ -34,6 +34,7 @@ import org.elasticsearch.license.XPackLicenseState;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.script.MockMustacheScriptEngine;
 import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.SearchResponseUtils;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
@@ -312,8 +313,7 @@ public abstract class AbstractWatcherIntegrationTestCase extends ESIntegTestCase
     }
 
     protected long docCount(String index, SearchSourceBuilder source) {
-        SearchRequestBuilder builder = prepareSearch(index).setSource(source).setSize(0);
-        return builder.get().getHits().getTotalHits().value;
+        return SearchResponseUtils.getTotalHitsValue(prepareSearch(index).setSource(source).setSize(0));
     }
 
     protected SearchResponse searchHistory(SearchSourceBuilder builder) {
@@ -353,7 +353,7 @@ public abstract class AbstractWatcherIntegrationTestCase extends ESIntegTestCase
         final AtomicReference<SearchResponse> lastResponse = new AtomicReference<>();
         try {
             assertBusy(() -> {
-                ClusterState state = clusterAdmin().prepareState().get().getState();
+                ClusterState state = clusterAdmin().prepareState(TEST_REQUEST_TIMEOUT).get().getState();
                 String[] watchHistoryIndices = indexNameExpressionResolver().concreteIndexNames(
                     state,
                     IndicesOptions.lenientExpandOpen(),
@@ -416,16 +416,10 @@ public abstract class AbstractWatcherIntegrationTestCase extends ESIntegTestCase
 
     protected long findNumberOfPerformedActions(String watchName) {
         refresh();
-        SearchResponse searchResponse = prepareSearch(HistoryStoreField.DATA_STREAM + "*").setIndicesOptions(
-            IndicesOptions.lenientExpandOpen()
-        ).setQuery(boolQuery().must(matchQuery("watch_id", watchName)).must(matchQuery("state", ExecutionState.EXECUTED.id()))).get();
-        long totalHistsValue;
-        try {
-            totalHistsValue = searchResponse.getHits().getTotalHits().value;
-        } finally {
-            searchResponse.decRef();
-        }
-        return totalHistsValue;
+        return SearchResponseUtils.getTotalHitsValue(
+            prepareSearch(HistoryStoreField.DATA_STREAM + "*").setIndicesOptions(IndicesOptions.lenientExpandOpen())
+                .setQuery(boolQuery().must(matchQuery("watch_id", watchName)).must(matchQuery("state", ExecutionState.EXECUTED.id())))
+        );
     }
 
     protected void assertWatchWithNoActionNeeded(final String watchName, final long expectedWatchActionsWithNoActionNeeded)
@@ -435,7 +429,7 @@ public abstract class AbstractWatcherIntegrationTestCase extends ESIntegTestCase
             assertBusy(() -> {
                 // The watch_history index gets created in the background when the first watch is triggered
                 // so we to check first is this index is created and shards are started
-                ClusterState state = clusterAdmin().prepareState().get().getState();
+                ClusterState state = clusterAdmin().prepareState(TEST_REQUEST_TIMEOUT).get().getState();
                 String[] watchHistoryIndices = indexNameExpressionResolver().concreteIndexNames(
                     state,
                     IndicesOptions.lenientExpandOpen(),
@@ -482,7 +476,7 @@ public abstract class AbstractWatcherIntegrationTestCase extends ESIntegTestCase
     protected void assertWatchWithMinimumActionsCount(final String watchName, final ExecutionState recordState, final long recordCount)
         throws Exception {
         assertBusy(() -> {
-            ClusterState state = clusterAdmin().prepareState().get().getState();
+            ClusterState state = clusterAdmin().prepareState(TEST_REQUEST_TIMEOUT).get().getState();
             String[] watchHistoryIndices = indexNameExpressionResolver().concreteIndexNames(
                 state,
                 IndicesOptions.lenientExpandOpen(),
@@ -546,7 +540,7 @@ public abstract class AbstractWatcherIntegrationTestCase extends ESIntegTestCase
 
             boolean isAllStateStopped = states.stream().allMatch(w -> w == WatcherState.STOPPED);
             if (isAllStateStopped) {
-                assertAcked(new WatcherServiceRequestBuilder(client()).start().get());
+                assertAcked(new WatcherServiceRequestBuilder(TEST_REQUEST_TIMEOUT, client()).start().get());
                 throw new AssertionError("all nodes are stopped, restarting");
             }
 
@@ -588,7 +582,7 @@ public abstract class AbstractWatcherIntegrationTestCase extends ESIntegTestCase
 
             boolean isAllStateStarted = states.stream().allMatch(w -> w == WatcherState.STARTED);
             if (isAllStateStarted) {
-                assertAcked(new WatcherServiceRequestBuilder(client()).stop().get());
+                assertAcked(new WatcherServiceRequestBuilder(TEST_REQUEST_TIMEOUT, client()).stop().get());
                 throw new AssertionError("all nodes are started, stopping");
             }
 

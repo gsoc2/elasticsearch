@@ -18,6 +18,7 @@ import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.bootstrap.BootstrapCheck;
 import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.client.internal.OriginSettingClient;
+import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.DataStream;
 import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
@@ -26,6 +27,7 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.ClusterSettings;
 import org.elasticsearch.common.settings.IndexScopedSettings;
 import org.elasticsearch.common.settings.Setting;
@@ -37,6 +39,8 @@ import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.core.IOUtils;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.env.Environment;
+import org.elasticsearch.features.FeatureService;
+import org.elasticsearch.features.NodeFeature;
 import org.elasticsearch.index.IndexModule;
 import org.elasticsearch.indices.SystemIndexDescriptor;
 import org.elasticsearch.license.XPackLicenseState;
@@ -68,6 +72,7 @@ import org.elasticsearch.xpack.core.watcher.crypto.CryptoService;
 import org.elasticsearch.xpack.core.watcher.execution.TriggeredWatchStoreField;
 import org.elasticsearch.xpack.core.watcher.history.HistoryStoreField;
 import org.elasticsearch.xpack.core.watcher.input.none.NoneInput;
+import org.elasticsearch.xpack.core.watcher.support.WatcherDateTimeUtils;
 import org.elasticsearch.xpack.core.watcher.transform.TransformRegistry;
 import org.elasticsearch.xpack.core.watcher.transport.actions.QueryWatchesAction;
 import org.elasticsearch.xpack.core.watcher.transport.actions.ack.AckWatchAction;
@@ -200,7 +205,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
@@ -215,10 +220,8 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
 
     // This setting is only here for backward compatibility reasons as 6.x indices made use of it. It can be removed in 8.x.
     @Deprecated
-    public static final Setting<String> INDEX_WATCHER_TEMPLATE_VERSION_SETTING = new Setting<>(
+    public static final Setting<String> INDEX_WATCHER_TEMPLATE_VERSION_SETTING = Setting.simpleString(
         "index.xpack.watcher.template.version",
-        "",
-        Function.identity(),
         Setting.Property.IndexScope
     );
     public static final Setting<Boolean> ENCRYPT_SENSITIVE_DATA_SETTING = Setting.boolSetting(
@@ -317,6 +320,11 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
         Environment environment = services.environment();
         ScriptService scriptService = services.scriptService();
         NamedXContentRegistry xContentRegistry = services.xContentRegistry();
+        FeatureService featureService = services.featureService();
+        Predicate<NodeFeature> clusterSupportsFeature = f -> {
+            ClusterState state = clusterService.state();
+            return state.clusterRecovered() && featureService.clusterHasFeature(state, f);
+        };
 
         // only initialize these classes if Watcher is enabled, and only after the plugin security policy for Watcher is in place
         BodyPartSource.init();
@@ -387,7 +395,7 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
                 ScriptTransform.TYPE,
                 new ScriptTransformFactory(scriptService),
                 SearchTransform.TYPE,
-                new SearchTransformFactory(settings, client, xContentRegistry, scriptService)
+                new SearchTransformFactory(settings, client, xContentRegistry, clusterSupportsFeature, scriptService)
             )
         );
 
@@ -410,7 +418,10 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
 
         // inputs
         final Map<String, InputFactory<?, ?, ?>> inputFactories = new HashMap<>();
-        inputFactories.put(SearchInput.TYPE, new SearchInputFactory(settings, client, xContentRegistry, scriptService));
+        inputFactories.put(
+            SearchInput.TYPE,
+            new SearchInputFactory(settings, client, xContentRegistry, clusterSupportsFeature, scriptService)
+        );
         inputFactories.put(SimpleInput.TYPE, new SimpleInputFactory());
         inputFactories.put(HttpInput.TYPE, new HttpInputFactory(settings, httpClient, templateEngine));
         inputFactories.put(NoneInput.TYPE, new NoneInputFactory());
@@ -476,7 +487,7 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
             .setBulkSize(SETTING_BULK_SIZE.get(settings))
             .build();
 
-        HistoryStore historyStore = new HistoryStore(bulkProcessor);
+        HistoryStore historyStore = new HistoryStore(bulkProcessor, settings);
 
         // schedulers
         final Set<Schedule.Parser<?>> scheduleParsers = new HashSet<>();
@@ -500,7 +511,11 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
         final TriggeredWatch.Parser triggeredWatchParser = new TriggeredWatch.Parser(triggerService);
         final TriggeredWatchStore triggeredWatchStore = new TriggeredWatchStore(settings, client, triggeredWatchParser, bulkProcessor);
 
-        final WatcherSearchTemplateService watcherSearchTemplateService = new WatcherSearchTemplateService(scriptService, xContentRegistry);
+        final WatcherSearchTemplateService watcherSearchTemplateService = new WatcherSearchTemplateService(
+            scriptService,
+            xContentRegistry,
+            clusterSupportsFeature
+        );
         final WatchExecutor watchExecutor = getWatchExecutor(threadPool);
         final WatchParser watchParser = new WatchParser(triggerService, registry, inputRegistry, cryptoService, getClock());
 
@@ -533,6 +548,7 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
         listener = new WatcherIndexingListener(watchParser, getClock(), triggerService, watcherLifeCycleService.getState());
         clusterService.addListener(listener);
 
+        logger.info("Watcher initialized components at {}", WatcherDateTimeUtils.dateTimeFormatter.formatMillis(getClock().millis()));
         // note: clock is needed here until actions can be constructed directly instead of by guice
         return Arrays.asList(
             new ClockHolder(getClock()),
@@ -594,6 +610,7 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
         settings.add(SETTING_BULK_CONCURRENT_REQUESTS);
         settings.add(SETTING_BULK_FLUSH_INTERVAL);
         settings.add(SETTING_BULK_SIZE);
+        settings.add(HistoryStore.MAX_HISTORY_SIZE_SETTING);
 
         // notification services
         settings.addAll(SlackService.getSettings());
@@ -688,12 +705,14 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
     @Override
     public List<RestHandler> getRestHandlers(
         Settings settings,
+        NamedWriteableRegistry namedWriteableRegistry,
         RestController restController,
         ClusterSettings clusterSettings,
         IndexScopedSettings indexScopedSettings,
         SettingsFilter settingsFilter,
         IndexNameExpressionResolver indexNameExpressionResolver,
-        Supplier<DiscoveryNodes> nodesInCluster
+        Supplier<DiscoveryNodes> nodesInCluster,
+        Predicate<NodeFeature> clusterSupportsFeature
     ) {
         if (false == enabled) {
             return emptyList();
@@ -813,7 +832,7 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
             .orElse(false);
 
         if (manuallyStopped == false) {
-            WatcherServiceRequest serviceRequest = new WatcherServiceRequest();
+            WatcherServiceRequest serviceRequest = new WatcherServiceRequest(TimeValue.THIRTY_SECONDS /* TODO should this be longer? */);
             serviceRequest.stop();
             originClient.execute(WatcherServiceAction.INSTANCE, serviceRequest, ActionListener.wrap((response) -> {
                 listener.onResponse(Collections.singletonMap("manually_stopped", manuallyStopped));
@@ -834,7 +853,7 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
         Client originClient = new OriginSettingClient(client, WATCHER_ORIGIN);
         boolean manuallyStopped = (boolean) preUpgradeMetadata.getOrDefault("manually_stopped", false);
         if (manuallyStopped == false) {
-            WatcherServiceRequest serviceRequest = new WatcherServiceRequest();
+            WatcherServiceRequest serviceRequest = new WatcherServiceRequest(TimeValue.THIRTY_SECONDS /* TODO should this be longer? */);
             serviceRequest.start();
             originClient.execute(WatcherServiceAction.INSTANCE, serviceRequest, ActionListener.wrap((response) -> {
                 listener.onResponse(response.isAcknowledged());
@@ -853,7 +872,6 @@ public class Watcher extends Plugin implements SystemIndexPlugin, ScriptPlugin, 
     private static Settings getWatchesIndexSettings() {
         return Settings.builder()
             .put("index.number_of_shards", 1)
-            .put("index.number_of_replicas", 0)
             .put("index.auto_expand_replicas", "0-1")
             .put(IndexMetadata.INDEX_FORMAT_SETTING.getKey(), 6)
             .put(IndexMetadata.SETTING_PRIORITY, 800)

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.mapper;
@@ -555,8 +556,21 @@ public abstract class BlockDocValuesReader implements BlockLoader.AllReader {
             this.ordinals = ordinals;
         }
 
+        private BlockLoader.Block readSingleDoc(BlockFactory factory, int docId) throws IOException {
+            if (ordinals.advanceExact(docId)) {
+                BytesRef v = ordinals.lookupOrd(ordinals.ordValue());
+                // the returned BytesRef can be reused
+                return factory.constantBytes(BytesRef.deepCopyOf(v));
+            } else {
+                return factory.constantNulls();
+            }
+        }
+
         @Override
         public BlockLoader.Block read(BlockFactory factory, Docs docs) throws IOException {
+            if (docs.count() == 1) {
+                return readSingleDoc(factory, docs.get(0));
+            }
             try (BlockLoader.SingletonOrdinalsBuilder builder = factory.singletonOrdinalsBuilder(ordinals, docs.count())) {
                 for (int i = 0; i < docs.count(); i++) {
                     int doc = docs.get(i);

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.gradle.testclusters;
 
@@ -201,14 +202,20 @@ public abstract class RunTask extends DefaultTestClustersTask {
                     try {
                         mockServer.start();
                         node.setting("telemetry.metrics.enabled", "true");
-                        node.setting("tracing.apm.agent.server_url", "http://127.0.0.1:" + mockServer.getPort());
+                        node.setting("telemetry.tracing.enabled", "true");
+                        node.setting("telemetry.agent.transaction_sample_rate", "0.10");
+                        node.setting("telemetry.agent.metrics_interval", "10s");
+                        node.setting("telemetry.agent.server_url", "http://127.0.0.1:" + mockServer.getPort());
                     } catch (IOException e) {
                         logger.warn("Unable to start APM server", e);
                     }
-                } else if (node.getSettingKeys().contains("telemetry.metrics.enabled") == false) {
-                    // in serverless metrics are enabled by default
-                    // if metrics were not enabled explicitly for gradlew run we should disable them
+                }
+                // in serverless metrics are enabled by default
+                // if metrics were not enabled explicitly for gradlew run we should disable them
+                else if (node.getSettingKeys().contains("telemetry.metrics.enabled") == false) { // metrics
                     node.setting("telemetry.metrics.enabled", "false");
+                } else if (node.getSettingKeys().contains("telemetry.tracing.enabled") == false) { // tracing
+                    node.setting("telemetry.tracing.enabled", "false");
                 }
 
             }

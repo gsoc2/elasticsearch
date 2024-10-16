@@ -10,7 +10,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.support.GroupedActionListener;
+import org.elasticsearch.action.ActionRunnable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.cache.Cache;
@@ -34,6 +34,8 @@ import org.elasticsearch.xpack.core.security.authz.accesscontrol.DocumentSubsetB
 import org.elasticsearch.xpack.core.security.authz.permission.FieldPermissionsCache;
 import org.elasticsearch.xpack.core.security.authz.permission.FieldPermissionsDefinition;
 import org.elasticsearch.xpack.core.security.authz.permission.FieldPermissionsDefinition.FieldGrantExcludeGroup;
+import org.elasticsearch.xpack.core.security.authz.permission.RemoteClusterPermissionGroup;
+import org.elasticsearch.xpack.core.security.authz.permission.RemoteClusterPermissions;
 import org.elasticsearch.xpack.core.security.authz.permission.Role;
 import org.elasticsearch.xpack.core.security.authz.privilege.ApplicationPrivilege;
 import org.elasticsearch.xpack.core.security.authz.privilege.ConfigurableClusterPrivilege;
@@ -64,6 +66,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
@@ -90,6 +93,11 @@ public class CompositeRolesStore {
         Property.NodeScope
     );
     private static final Logger logger = LogManager.getLogger(CompositeRolesStore.class);
+    /**
+     * See {@link #shouldForkRoleBuilding(Set)}
+     */
+    private static final int ROLE_DESCRIPTOR_FORK_THRESHOLD = 100;
+    private static final int INDEX_PRIVILEGE_FORK_THRESHOLD = 1000;
 
     private final RoleProviders roleProviders;
     private final NativePrivilegeStore privilegeStore;
@@ -104,8 +112,8 @@ public class CompositeRolesStore {
     private final Role superuserRole;
     private final Map<String, Role> internalUserRoles;
     private final RestrictedIndices restrictedIndices;
-    private final WorkflowService workflowService;
     private final ThreadContext threadContext;
+    private final Executor roleBuildingExecutor;
 
     public CompositeRolesStore(
         Settings settings,
@@ -118,8 +126,8 @@ public class CompositeRolesStore {
         ServiceAccountService serviceAccountService,
         DocumentSubsetBitsetCache dlsBitsetCache,
         RestrictedIndices restrictedIndices,
-        Consumer<Collection<RoleDescriptor>> effectiveRoleDescriptorsConsumer,
-        WorkflowService workflowService
+        Executor roleBuildingExecutor,
+        Consumer<Collection<RoleDescriptor>> effectiveRoleDescriptorsConsumer
     ) {
         this.roleProviders = roleProviders;
         roleProviders.addChangeListener(new RoleProviders.ChangeListener() {
@@ -179,8 +187,8 @@ public class CompositeRolesStore {
             effectiveRoleDescriptorsConsumer
         );
         this.anonymousUser = new AnonymousUser(settings);
-        this.workflowService = workflowService;
         this.threadContext = threadContext;
+        this.roleBuildingExecutor = roleBuildingExecutor;
     }
 
     public void getRoles(Authentication authentication, ActionListener<Tuple<Role, Role>> roleActionListener) {
@@ -278,19 +286,68 @@ public class CompositeRolesStore {
                 } else if (RolesRetrievalResult.SUPERUSER == rolesRetrievalResult) {
                     roleActionListener.onResponse(superuserRole);
                 } else {
-                    buildThenMaybeCacheRole(
-                        roleKey,
-                        rolesRetrievalResult.getRoleDescriptors(),
-                        rolesRetrievalResult.getMissingRoles(),
-                        rolesRetrievalResult.isSuccess(),
-                        invalidationCounter,
-                        ActionListener.wrap(roleActionListener::onResponse, failureHandler)
-                    );
+                    final ActionListener<Role> wrapped = ActionListener.wrap(roleActionListener::onResponse, failureHandler);
+                    if (shouldForkRoleBuilding(rolesRetrievalResult.getRoleDescriptors())) {
+                        roleBuildingExecutor.execute(
+                            ActionRunnable.wrap(
+                                wrapped,
+                                l -> buildThenMaybeCacheRole(
+                                    roleKey,
+                                    rolesRetrievalResult.getRoleDescriptors(),
+                                    rolesRetrievalResult.getMissingRoles(),
+                                    rolesRetrievalResult.isSuccess(),
+                                    invalidationCounter,
+                                    l
+                                )
+                            )
+                        );
+                    } else {
+                        buildThenMaybeCacheRole(
+                            roleKey,
+                            rolesRetrievalResult.getRoleDescriptors(),
+                            rolesRetrievalResult.getMissingRoles(),
+                            rolesRetrievalResult.isSuccess(),
+                            invalidationCounter,
+                            wrapped
+                        );
+                    }
                 }
             }, failureHandler));
         } else {
             roleActionListener.onResponse(existing);
         }
+    }
+
+    /**
+     * Uses heuristics such as presence of application privileges to determine if role building will be expensive
+     * and therefore warrants forking.
+     * Package-private for testing.
+     */
+    boolean shouldForkRoleBuilding(Set<RoleDescriptor> roleDescriptors) {
+        // A role with many role descriptors is likely expensive to build
+        if (roleDescriptors.size() > ROLE_DESCRIPTOR_FORK_THRESHOLD) {
+            return true;
+        }
+        int totalIndexPrivileges = 0;
+        int totalRemoteIndexPrivileges = 0;
+        for (RoleDescriptor roleDescriptor : roleDescriptors) {
+            // Application privileges can also result in big automata; it's difficult to determine how big application privileges
+            // are so err on the side of caution
+            if (roleDescriptor.hasApplicationPrivileges()) {
+                return true;
+            }
+            // Index privilege names or remote index privilege names can result in big and complex automata
+            totalIndexPrivileges += roleDescriptor.getIndicesPrivileges().length;
+            totalRemoteIndexPrivileges += roleDescriptor.getRemoteIndicesPrivileges().length;
+            if (totalIndexPrivileges > INDEX_PRIVILEGE_FORK_THRESHOLD || totalRemoteIndexPrivileges > INDEX_PRIVILEGE_FORK_THRESHOLD) {
+                return true;
+            }
+            // Likewise for FLS/DLS
+            if (roleDescriptor.isUsingDocumentOrFieldLevelSecurity()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean includesSuperuserRole(RoleReference roleReference) {
@@ -315,10 +372,11 @@ public class CompositeRolesStore {
         ActionListener<Role> listener
     ) {
         logger.trace(
-            "Building role from descriptors [{}] for names [{}] from source [{}]",
+            "Building role from descriptors [{}] for names [{}] from source [{}] on [{}]",
             roleDescriptors,
             roleKey.getNames(),
-            roleKey.getSource()
+            roleKey.getSource(),
+            Thread.currentThread().getName()
         );
         buildRoleFromDescriptors(
             roleDescriptors,
@@ -349,30 +407,18 @@ public class CompositeRolesStore {
         );
     }
 
-    public void getRoleDescriptorsList(Subject subject, ActionListener<Collection<Set<RoleDescriptor>>> listener) {
-        tryGetRoleDescriptorForInternalUser(subject).ifPresentOrElse(
-            roleDescriptor -> listener.onResponse(List.of(Set.of(roleDescriptor))),
-            () -> {
-                final List<RoleReference> roleReferences = subject.getRoleReferenceIntersection(anonymousUser).getRoleReferences();
-                final GroupedActionListener<Set<RoleDescriptor>> groupedActionListener = new GroupedActionListener<>(
-                    roleReferences.size(),
-                    listener
-                );
+    public void getRoleDescriptors(Subject subject, ActionListener<Set<RoleDescriptor>> listener) {
+        tryGetRoleDescriptorForInternalUser(subject).ifPresentOrElse(roleDescriptor -> listener.onResponse(Set.of(roleDescriptor)), () -> {
+            final List<RoleReference> roleReferences = subject.getRoleReferenceIntersection(anonymousUser).getRoleReferences();
+            assert roleReferences.size() == 1; // we only handle the singleton case today, but that may change with derived API keys
 
-                roleReferences.forEach(
-                    roleReference -> roleReference.resolve(
-                        roleReferenceResolver,
-                        groupedActionListener.delegateFailureAndWrap((delegate, rolesRetrievalResult) -> {
-                            if (rolesRetrievalResult.isSuccess()) {
-                                delegate.onResponse(rolesRetrievalResult.getRoleDescriptors());
-                            } else {
-                                delegate.onFailure(new ElasticsearchException("role retrieval had one or more failures"));
-                            }
-                        })
-                    )
-                );
-            }
-        );
+            ActionListener.run(listener.<RolesRetrievalResult>map(rolesRetrievalResult -> {
+                if (rolesRetrievalResult.isSuccess() == false) {
+                    throw new ElasticsearchException("role retrieval had one or more failures");
+                }
+                return rolesRetrievalResult.getRoleDescriptors();
+            }), l -> roleReferences.iterator().next().resolve(roleReferenceResolver, l));
+        });
     }
 
     // Package private for testing
@@ -445,6 +491,7 @@ public class CompositeRolesStore {
         final Map<Tuple<String, Set<String>>, Set<String>> applicationPrivilegesMap = new HashMap<>();
         final Set<String> workflows = new HashSet<>();
         final List<String> roleNames = new ArrayList<>(roleDescriptors.size());
+        final RemoteClusterPermissions remoteClusterPermissions = new RemoteClusterPermissions();
         for (RoleDescriptor descriptor : roleDescriptors) {
             roleNames.add(descriptor.getName());
             if (descriptor.getClusterPrivileges() != null) {
@@ -462,6 +509,12 @@ public class CompositeRolesStore {
 
             if (descriptor.hasRemoteIndicesPrivileges()) {
                 groupIndexPrivilegesByCluster(descriptor.getRemoteIndicesPrivileges(), remoteIndicesPrivilegesByCluster);
+            }
+
+            if (descriptor.hasRemoteClusterPermissions()) {
+                for (RemoteClusterPermissionGroup groups : descriptor.getRemoteClusterPermissions().groups()) {
+                    remoteClusterPermissions.addGroup(groups);
+                }
             }
 
             for (RoleDescriptor.ApplicationResourcePrivileges appPrivilege : descriptor.getApplicationPrivileges()) {
@@ -506,7 +559,7 @@ public class CompositeRolesStore {
 
         remoteIndicesPrivilegesByCluster.forEach((clusterAliasKey, remoteIndicesPrivilegesForCluster) -> {
             remoteIndicesPrivilegesForCluster.forEach(
-                (privilege) -> builder.addRemoteGroup(
+                (privilege) -> builder.addRemoteIndicesGroup(
                     clusterAliasKey,
                     fieldPermissionsCache.getFieldPermissions(
                         new FieldPermissionsDefinition(privilege.getGrantedFields(), privilege.getDeniedFields())
@@ -518,6 +571,13 @@ public class CompositeRolesStore {
                 )
             );
         });
+
+        if (remoteClusterPermissions.hasPrivileges()) {
+            builder.addRemoteClusterPermissions(remoteClusterPermissions);
+        } else {
+            builder.addRemoteClusterPermissions(RemoteClusterPermissions.NONE);
+        }
+
         if (false == workflows.isEmpty()) {
             builder.workflows(workflows);
         }
@@ -532,6 +592,7 @@ public class CompositeRolesStore {
             privilegeStore.getPrivileges(
                 applicationNames,
                 applicationPrivilegeNames,
+                false, // TODO revisit if we should also wait for an available security index here
                 listener.delegateFailureAndWrap((delegate, appPrivileges) -> {
                     applicationPrivilegesMap.forEach(
                         (key, names) -> ApplicationPrivilege.get(key.v1(), names, appPrivileges)

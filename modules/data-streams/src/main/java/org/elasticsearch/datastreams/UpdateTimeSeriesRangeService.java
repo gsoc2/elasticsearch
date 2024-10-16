@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.datastreams;
 
@@ -108,7 +109,7 @@ public class UpdateTimeSeriesRangeService extends AbstractLifecycleComponent imp
             Index head = dataStream.getWriteIndex();
             IndexMetadata im = current.metadata().getIndexSafe(head);
             Instant currentEnd = IndexSettings.TIME_SERIES_END_TIME.get(im.getSettings());
-            TimeValue lookAheadTime = DataStreamsPlugin.LOOK_AHEAD_TIME.get(im.getSettings());
+            TimeValue lookAheadTime = DataStreamsPlugin.getLookAheadTime(im.getSettings());
             Instant newEnd = DataStream.getCanonicalTimestampBound(
                 now.plus(lookAheadTime.getMillis(), ChronoUnit.MILLIS).plus(pollInterval.getMillis(), ChronoUnit.MILLIS)
             );

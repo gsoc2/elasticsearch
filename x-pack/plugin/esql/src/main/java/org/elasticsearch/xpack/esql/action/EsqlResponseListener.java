@@ -7,31 +7,37 @@
 
 package org.elasticsearch.xpack.esql.action;
 
+import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.core.Releasable;
+import org.elasticsearch.core.Releasables;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.logging.Level;
 import org.elasticsearch.logging.LogManager;
 import org.elasticsearch.logging.Logger;
-import org.elasticsearch.rest.ChunkedRestResponseBody;
+import org.elasticsearch.rest.ChunkedRestResponseBodyPart;
 import org.elasticsearch.rest.RestChannel;
 import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.rest.RestStatus;
-import org.elasticsearch.rest.action.RestResponseListener;
+import org.elasticsearch.rest.action.RestRefCountedChunkedToXContentListener;
 import org.elasticsearch.xcontent.MediaType;
+import org.elasticsearch.xpack.esql.arrow.ArrowFormat;
+import org.elasticsearch.xpack.esql.arrow.ArrowResponse;
 import org.elasticsearch.xpack.esql.formatter.TextFormat;
 import org.elasticsearch.xpack.esql.plugin.EsqlMediaTypeParser;
 
+import java.io.IOException;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 
 import static org.elasticsearch.xpack.esql.formatter.TextFormat.CSV;
 import static org.elasticsearch.xpack.esql.formatter.TextFormat.URL_PARAM_DELIMITER;
-import static org.elasticsearch.xpack.ql.util.LoggingUtils.logOnFailure;
 
 /**
  * Listens for a single {@link EsqlQueryResponse}, builds a corresponding {@link RestResponse} and sends it.
  */
-public class EsqlResponseListener extends RestResponseListener<EsqlQueryResponse> {
+public final class EsqlResponseListener extends RestRefCountedChunkedToXContentListener<EsqlQueryResponse> {
     /**
      * A simple, thread-safe stop watch for timing a single action.
      * Allows to stop the time for building a response and to log it at a later point.
@@ -118,54 +124,93 @@ public class EsqlResponseListener extends RestResponseListener<EsqlQueryResponse
     }
 
     @Override
-    public RestResponse buildResponse(EsqlQueryResponse esqlResponse) throws Exception {
+    protected void processResponse(EsqlQueryResponse esqlQueryResponse) throws IOException {
+        channel.sendResponse(buildResponse(esqlQueryResponse));
+    }
+
+    private RestResponse buildResponse(EsqlQueryResponse esqlResponse) throws IOException {
         boolean success = false;
+        final Releasable releasable = releasableFromResponse(esqlResponse);
         try {
             RestResponse restResponse;
             if (mediaType instanceof TextFormat format) {
                 restResponse = RestResponse.chunked(
                     RestStatus.OK,
-                    ChunkedRestResponseBody.fromTextChunks(
-                        format.contentType(restRequest),
-                        format.format(restRequest, esqlResponse),
-                        esqlResponse
-                    )
+                    ChunkedRestResponseBodyPart.fromTextChunks(format.contentType(restRequest), format.format(restRequest, esqlResponse)),
+                    releasable
                 );
+            } else if (mediaType == ArrowFormat.INSTANCE) {
+                ArrowResponse arrowResponse = new ArrowResponse(
+                    // Map here to avoid cyclic dependencies between the arrow subproject and its parent
+                    esqlResponse.columns().stream().map(c -> new ArrowResponse.Column(c.outputType(), c.name())).toList(),
+                    esqlResponse.pages()
+                );
+                restResponse = RestResponse.chunked(RestStatus.OK, arrowResponse, Releasables.wrap(arrowResponse, releasable));
             } else {
                 restResponse = RestResponse.chunked(
                     RestStatus.OK,
-                    ChunkedRestResponseBody.fromXContent(esqlResponse, channel.request(), channel, esqlResponse)
+                    ChunkedRestResponseBodyPart.fromXContent(esqlResponse, channel.request(), channel),
+                    releasable
                 );
             }
-            long tookNanos = stopWatch.stop().getNanos();
-            restResponse.addHeader(HEADER_NAME_TOOK_NANOS, Long.toString(tookNanos));
+            restResponse.addHeader(HEADER_NAME_TOOK_NANOS, Long.toString(getTook(esqlResponse, TimeUnit.NANOSECONDS)));
             success = true;
             return restResponse;
         } finally {
             if (success == false) {
-                esqlResponse.close();
+                releasable.close();
             }
         }
     }
 
     /**
-     * Log the execution time and query when handling an ES|QL response.
+     * If the {@link EsqlQueryResponse} has overallTook time present, use that, as it persists across
+     * REST calls, so it works properly with long-running async-searches.
+     * @param esqlResponse
+     * @return took time in nanos either from the {@link EsqlQueryResponse} or the stopWatch in this object
+     */
+    private long getTook(EsqlQueryResponse esqlResponse, TimeUnit timeUnit) {
+        assert timeUnit == TimeUnit.NANOSECONDS || timeUnit == TimeUnit.MILLISECONDS : "Unsupported TimeUnit: " + timeUnit;
+        TimeValue tookTime = stopWatch.stop();
+        if (esqlResponse != null && esqlResponse.getExecutionInfo() != null && esqlResponse.getExecutionInfo().overallTook() != null) {
+            tookTime = esqlResponse.getExecutionInfo().overallTook();
+        }
+        if (timeUnit == TimeUnit.NANOSECONDS) {
+            return tookTime.nanos();
+        } else {
+            return tookTime.millis();
+        }
+    }
+
+    /**
+     * Log internal server errors all the time and log queries if debug is enabled.
      */
     public ActionListener<EsqlQueryResponse> wrapWithLogging() {
+        ActionListener<EsqlQueryResponse> listener = ActionListener.wrap(this::onResponse, ex -> {
+            logOnFailure(ex);
+            onFailure(ex);
+        });
+        if (LOGGER.isDebugEnabled() == false) {
+            return listener;
+        }
         return ActionListener.wrap(r -> {
-            onResponse(r);
+            listener.onResponse(r);
             // At this point, the StopWatch should already have been stopped, so we log a consistent time.
-            LOGGER.info(
+            LOGGER.debug(
                 "Finished execution of ESQL query.\nQuery string: [{}]\nExecution time: [{}]ms",
                 esqlQuery,
-                stopWatch.stop().getMillis()
+                getTook(r, TimeUnit.MILLISECONDS)
             );
         }, ex -> {
             // In case of failure, stop the time manually before sending out the response.
-            long timeMillis = stopWatch.stop().getMillis();
-            LOGGER.info("Failed execution of ESQL query.\nQuery string: [{}]\nExecution time: [{}]ms", esqlQuery, timeMillis);
-            logOnFailure(LOGGER, ex);
-            onFailure(ex);
+            long timeMillis = getTook(null, TimeUnit.MILLISECONDS);
+            LOGGER.debug("Failed execution of ESQL query.\nQuery string: [{}]\nExecution time: [{}]ms", esqlQuery, timeMillis);
+            listener.onFailure(ex);
         });
+    }
+
+    static void logOnFailure(Throwable throwable) {
+        RestStatus status = ExceptionsHelper.status(throwable);
+        LOGGER.log(status.getStatus() >= 500 ? Level.WARN : Level.DEBUG, () -> "Request failed with status [" + status + "]: ", throwable);
     }
 }

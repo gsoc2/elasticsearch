@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.rest.action.ingest;
@@ -26,7 +27,7 @@ import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.rest.Scope;
 import org.elasticsearch.rest.ServerlessScope;
-import org.elasticsearch.rest.action.RestToXContentListener;
+import org.elasticsearch.rest.action.RestBuilderListener;
 import org.elasticsearch.search.fetch.subphase.FetchSourceContext;
 import org.elasticsearch.xcontent.ToXContent;
 import org.elasticsearch.xcontent.XContentBuilder;
@@ -74,7 +75,9 @@ public class RestSimulateIngestAction extends BaseRestHandler {
         Tuple<XContentType, BytesReference> sourceTuple = request.contentOrSourceParam();
         Map<String, Object> sourceMap = XContentHelper.convertToMap(sourceTuple.v2(), false, sourceTuple.v1()).v2();
         SimulateBulkRequest bulkRequest = new SimulateBulkRequest(
-            (Map<String, Map<String, Object>>) sourceMap.remove("pipeline_substitutions")
+            (Map<String, Map<String, Object>>) sourceMap.remove("pipeline_substitutions"),
+            (Map<String, Map<String, Object>>) sourceMap.remove("component_template_substitutions"),
+            (Map<String, Map<String, Object>>) sourceMap.remove("index_template_substitutions")
         );
         BytesReference transformedData = convertToBulkRequestXContentBytes(sourceMap);
         bulkRequest.add(
@@ -83,6 +86,7 @@ public class RestSimulateIngestAction extends BaseRestHandler {
             null,
             defaultFetchSourceContext,
             defaultPipeline,
+            null,
             null,
             true,
             true,
@@ -140,7 +144,7 @@ public class RestSimulateIngestAction extends BaseRestHandler {
      * simulate-style xcontent.
      * Non-private for unit testing
      */
-    static class SimulateIngestRestToXContentListener extends RestToXContentListener<BulkResponse> {
+    static class SimulateIngestRestToXContentListener extends RestBuilderListener<BulkResponse> {
 
         SimulateIngestRestToXContentListener(RestChannel channel) {
             super(channel);
@@ -150,8 +154,7 @@ public class RestSimulateIngestAction extends BaseRestHandler {
         public RestResponse buildResponse(BulkResponse response, XContentBuilder builder) throws Exception {
             assert response.isFragment() == false;
             toXContent(response, builder, channel.request());
-            RestStatus restStatus = statusFunction.apply(response);
-            return new RestResponse(restStatus, builder);
+            return new RestResponse(RestStatus.OK, builder);
         }
 
         private static void toXContent(BulkResponse response, XContentBuilder builder, ToXContent.Params params) throws IOException {

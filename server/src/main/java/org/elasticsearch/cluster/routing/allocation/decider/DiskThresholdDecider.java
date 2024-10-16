@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.cluster.routing.allocation.decider;
@@ -27,10 +28,12 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsException;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.core.UpdateForV9;
+import org.elasticsearch.snapshots.SnapshotShardSizeInfo;
 
 import java.util.Map;
 
 import static org.elasticsearch.cluster.routing.ExpectedShardSizeEstimator.getExpectedShardSize;
+import static org.elasticsearch.cluster.routing.ExpectedShardSizeEstimator.shouldReserveSpaceForInitializingShard;
 
 /**
  * The {@link DiskThresholdDecider} checks that the node a shard is potentially
@@ -69,7 +72,7 @@ public class DiskThresholdDecider extends AllocationDecider {
 
     public static final String NAME = "disk_threshold";
 
-    @UpdateForV9
+    @UpdateForV9(owner = UpdateForV9.Owner.DISTRIBUTED_COORDINATION)
     public static final Setting<Boolean> ENABLE_FOR_SINGLE_DATA_NODE = Setting.boolSetting(
         "cluster.routing.allocation.disk.watermark.enable_for_single_data_node",
         true,
@@ -116,40 +119,31 @@ public class DiskThresholdDecider extends AllocationDecider {
         boolean subtractShardsMovingAway,
         String dataPath,
         ClusterInfo clusterInfo,
+        SnapshotShardSizeInfo snapshotShardSizeInfo,
         Metadata metadata,
         RoutingTable routingTable,
         long sizeOfUnaccountableSearchableSnapshotShards
     ) {
         // Account for reserved space wherever it is available
         final ClusterInfo.ReservedSpace reservedSpace = clusterInfo.getReservedSpace(node.nodeId(), dataPath);
-        long totalSize = reservedSpace.getTotal();
+        long totalSize = reservedSpace.total();
         // NB this counts all shards on the node when the ClusterInfoService retrieved the node stats, which may include shards that are
         // no longer initializing because their recovery failed or was cancelled.
 
         // Where reserved space is unavailable (e.g. stats are out-of-sync) compute a conservative estimate for initialising shards
         for (ShardRouting routing : node.initializing()) {
-            if (routing.relocatingNodeId() == null && metadata.getIndexSafe(routing.index()).isSearchableSnapshot() == false) {
-                // in practice the only initializing-but-not-relocating non-searchable-snapshot shards with a nonzero expected shard size
-                // will be ones created
-                // by a resize (shrink/split/clone) operation which we expect to happen using hard links, so they shouldn't be taking
-                // any additional space and can be ignored here
-                continue;
-            }
-            if (reservedSpace.containsShardId(routing.shardId())) {
-                continue;
-            }
-            final String actualPath = clusterInfo.getDataPath(routing);
-            // if we don't yet know the actual path of the incoming shard then conservatively assume it's going to the path with the least
-            // free space
-            if (actualPath == null || actualPath.equals(dataPath)) {
-                totalSize += getExpectedShardSize(
-                    routing,
-                    Math.max(routing.getExpectedShardSize(), 0L),
-                    clusterInfo,
-                    null,
-                    metadata,
-                    routingTable
-                );
+            // Space needs to be reserved only when initializing shards that are going to use additional space
+            // that is not yet accounted for by `reservedSpace` in case of lengthy recoveries
+            if (shouldReserveSpaceForInitializingShard(routing, metadata) && reservedSpace.containsShardId(routing.shardId()) == false) {
+                final String actualPath = clusterInfo.getDataPath(routing);
+                // if we don't yet know the actual path of the incoming shard then conservatively assume
+                // it's going to the path with the least free space
+                if (actualPath == null || actualPath.equals(dataPath)) {
+                    totalSize += Math.max(
+                        routing.getExpectedShardSize(),
+                        getExpectedShardSize(routing, 0L, clusterInfo, snapshotShardSizeInfo, metadata, routingTable)
+                    );
+                }
             }
         }
 
@@ -158,7 +152,7 @@ public class DiskThresholdDecider extends AllocationDecider {
         if (subtractShardsMovingAway) {
             for (ShardRouting routing : node.relocating()) {
                 if (dataPath.equals(clusterInfo.getDataPath(routing))) {
-                    totalSize -= getExpectedShardSize(routing, 0L, clusterInfo, null, metadata, routingTable);
+                    totalSize -= getExpectedShardSize(routing, 0L, clusterInfo, snapshotShardSizeInfo, metadata, routingTable);
                 }
             }
         }
@@ -203,6 +197,7 @@ public class DiskThresholdDecider extends AllocationDecider {
                 false,
                 usage.getPath(),
                 allocation.clusterInfo(),
+                allocation.snapshotShardSizeInfo(),
                 allocation.metadata(),
                 allocation.routingTable(),
                 allocation.unaccountedSearchableSnapshotSize(node)
@@ -411,6 +406,7 @@ public class DiskThresholdDecider extends AllocationDecider {
                 true,
                 usage.getPath(),
                 allocation.clusterInfo(),
+                allocation.snapshotShardSizeInfo(),
                 allocation.metadata(),
                 allocation.routingTable(),
                 allocation.unaccountedSearchableSnapshotSize(node)
@@ -477,9 +473,9 @@ public class DiskThresholdDecider extends AllocationDecider {
             logger.debug(
                 "unable to determine disk usage for {}, defaulting to average across nodes [{} total] [{} free] [{}% free]",
                 node.nodeId(),
-                usage.getTotalBytes(),
-                usage.getFreeBytes(),
-                usage.getFreeDiskAsPercentage()
+                usage.totalBytes(),
+                usage.freeBytes(),
+                usage.freeDiskAsPercentage()
             );
         }
 
@@ -488,8 +484,9 @@ public class DiskThresholdDecider extends AllocationDecider {
             sizeOfUnaccountedShards(
                 node,
                 subtractLeavingShards,
-                usage.getPath(),
+                usage.path(),
                 allocation.clusterInfo(),
+                allocation.snapshotShardSizeInfo(),
                 allocation.metadata(),
                 allocation.routingTable(),
                 allocation.unaccountedSearchableSnapshotSize(node)
@@ -513,8 +510,8 @@ public class DiskThresholdDecider extends AllocationDecider {
         long totalBytes = 0;
         long freeBytes = 0;
         for (DiskUsage du : usages.values()) {
-            totalBytes += du.getTotalBytes();
-            freeBytes += du.getFreeBytes();
+            totalBytes += du.totalBytes();
+            freeBytes += du.freeBytes();
         }
         return new DiskUsage(node.nodeId(), node.node().getName(), "_na_", totalBytes / usages.size(), freeBytes / usages.size());
     }
@@ -552,18 +549,18 @@ public class DiskThresholdDecider extends AllocationDecider {
 
         long getFreeBytes() {
             try {
-                return Math.subtractExact(diskUsage.getFreeBytes(), relocatingShardSize);
+                return Math.subtractExact(diskUsage.freeBytes(), relocatingShardSize);
             } catch (ArithmeticException e) {
                 return Long.MAX_VALUE;
             }
         }
 
         String getPath() {
-            return diskUsage.getPath();
+            return diskUsage.path();
         }
 
         long getTotalBytes() {
-            return diskUsage.getTotalBytes();
+            return diskUsage.totalBytes();
         }
     }
 

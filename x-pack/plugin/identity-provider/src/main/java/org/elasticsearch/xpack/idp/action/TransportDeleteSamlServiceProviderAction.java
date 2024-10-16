@@ -11,9 +11,9 @@ import org.apache.logging.log4j.Logger;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.HandledTransportAction;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.common.util.iterable.Iterables;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.idp.saml.sp.SamlServiceProviderDocument;
@@ -54,9 +54,9 @@ public class TransportDeleteSamlServiceProviderAction extends HandledTransportAc
         final ActionListener<DeleteSamlServiceProviderResponse> listener
     ) {
         final String entityId = request.getEntityId();
-        index.findByEntityId(entityId, ActionListener.wrap(matchingDocuments -> {
+        index.findByEntityId(entityId, listener.delegateFailureAndWrap((delegate, matchingDocuments) -> {
             if (matchingDocuments.isEmpty()) {
-                listener.onResponse(new DeleteSamlServiceProviderResponse(null, entityId));
+                delegate.onResponse(new DeleteSamlServiceProviderResponse(null, entityId));
             } else if (matchingDocuments.size() == 1) {
                 final SamlServiceProviderIndex.DocumentSupplier docInfo = Iterables.get(matchingDocuments, 0);
                 final SamlServiceProviderDocument existingDoc = docInfo.getDocument();
@@ -66,9 +66,8 @@ public class TransportDeleteSamlServiceProviderAction extends HandledTransportAc
                 index.deleteDocument(
                     docInfo.version,
                     request.getRefreshPolicy(),
-                    ActionListener.wrap(
-                        deleteResponse -> listener.onResponse(new DeleteSamlServiceProviderResponse(deleteResponse, entityId)),
-                        listener::onFailure
+                    delegate.delegateFailureAndWrap(
+                        (l, deleteResponse) -> l.onResponse(new DeleteSamlServiceProviderResponse(deleteResponse, entityId))
                     )
                 );
             } else {
@@ -78,8 +77,8 @@ public class TransportDeleteSamlServiceProviderAction extends HandledTransportAc
                     entityId,
                     matchingDocuments.stream().map(d -> d.getDocument().docId).collect(Collectors.joining(","))
                 );
-                listener.onFailure(new IllegalStateException("Multiple service providers exist with entity id [" + entityId + "]"));
+                delegate.onFailure(new IllegalStateException("Multiple service providers exist with entity id [" + entityId + "]"));
             }
-        }, listener::onFailure));
+        }));
     }
 }

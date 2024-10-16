@@ -56,7 +56,7 @@ public class GetOverallBucketsAction extends ActionType<GetOverallBucketsAction.
     public static final String NAME = "cluster:monitor/xpack/ml/job/results/overall_buckets/get";
 
     private GetOverallBucketsAction() {
-        super(NAME, Response::new);
+        super(NAME);
     }
 
     public static class Request extends ActionRequest implements ToXContentObject {
@@ -243,11 +243,7 @@ public class GetOverallBucketsAction extends ActionType<GetOverallBucketsAction.
             if (end != null) {
                 builder.field(END.getPreferredName(), String.valueOf(end));
             }
-            if (builder.getRestApiVersion() == RestApiVersion.V_7) {
-                builder.field(DEPRECATED_ALLOW_NO_JOBS_PARAM, allowNoMatch);
-            } else {
-                builder.field(ALLOW_NO_MATCH.getPreferredName(), allowNoMatch);
-            }
+            builder.field(ALLOW_NO_MATCH.getPreferredName(), allowNoMatch);
             builder.endObject();
             return builder;
         }

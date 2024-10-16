@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.search;
@@ -24,7 +25,9 @@ import org.elasticsearch.transport.TransportService;
 
 import java.util.Collection;
 import java.util.Queue;
+import java.util.concurrent.ExecutionException;
 
+import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertResponse;
 import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.emptyIterable;
 import static org.hamcrest.Matchers.equalTo;
@@ -105,7 +108,7 @@ public class SearchShardsIT extends ESIntegTestCase {
         }
     }
 
-    public void testRandom() {
+    public void testRandom() throws ExecutionException, InterruptedException {
         int numIndices = randomIntBetween(1, 10);
         for (int i = 0; i < numIndices; i++) {
             String index = "index-" + i;
@@ -127,21 +130,22 @@ public class SearchShardsIT extends ESIntegTestCase {
             RangeQueryBuilder rangeQuery = new RangeQueryBuilder("value").from(from).to(to).includeUpper(true).includeLower(true);
             SearchRequest searchRequest = new SearchRequest().indices("index-*").source(new SearchSourceBuilder().query(rangeQuery));
             searchRequest.setPreFilterShardSize(1);
-            SearchResponse searchResponse = client().search(searchRequest).actionGet();
-            var searchShardsRequest = new SearchShardsRequest(
-                new String[] { "index-*" },
-                SearchRequest.DEFAULT_INDICES_OPTIONS,
-                rangeQuery,
-                null,
-                preference,
-                randomBoolean(),
-                randomBoolean() ? null : randomAlphaOfLength(10)
-            );
-            var searchShardsResponse = client().execute(TransportSearchShardsAction.TYPE, searchShardsRequest).actionGet();
+            assertResponse(client().search(searchRequest), searchResponse -> {
+                var searchShardsRequest = new SearchShardsRequest(
+                    new String[] { "index-*" },
+                    SearchRequest.DEFAULT_INDICES_OPTIONS,
+                    rangeQuery,
+                    null,
+                    preference,
+                    randomBoolean(),
+                    randomBoolean() ? null : randomAlphaOfLength(10)
+                );
+                var searchShardsResponse = client().execute(TransportSearchShardsAction.TYPE, searchShardsRequest).actionGet();
 
-            assertThat(searchShardsResponse.getGroups(), hasSize(searchResponse.getTotalShards()));
-            long skippedShards = searchShardsResponse.getGroups().stream().filter(SearchShardsGroup::skipped).count();
-            assertThat(skippedShards, equalTo((long) searchResponse.getSkippedShards()));
+                assertThat(searchShardsResponse.getGroups(), hasSize(searchResponse.getTotalShards()));
+                long skippedShards = searchShardsResponse.getGroups().stream().filter(SearchShardsGroup::skipped).count();
+                assertThat(skippedShards, equalTo((long) searchResponse.getSkippedShards()));
+            });
         }
     }
 

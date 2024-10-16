@@ -63,6 +63,17 @@ public class EvalOperator extends AbstractPageMappingOperator {
         /** A Factory for creating ExpressionEvaluators. */
         interface Factory {
             ExpressionEvaluator get(DriverContext context);
+
+            /**
+             * {@code true} if it is safe and fast to evaluate this expression eagerly
+             * in {@link ExpressionEvaluator}s that need to be lazy, like {@code CASE}.
+             * This defaults to {@code false}, but expressions
+             * that evaluate quickly and can not produce warnings may override this to
+             * {@code true} to get a significant speed-up in {@code CASE}-like operations.
+             */
+            default boolean eagerEvalSafeInLazy() {
+                return false;
+            }
         }
 
         /**
@@ -75,27 +86,22 @@ public class EvalOperator extends AbstractPageMappingOperator {
     public static final ExpressionEvaluator.Factory CONSTANT_NULL_FACTORY = new ExpressionEvaluator.Factory() {
         @Override
         public ExpressionEvaluator get(DriverContext driverContext) {
-            return CONSTANT_NULL;
-        }
+            return new ExpressionEvaluator() {
+                @Override
+                public Block eval(Page page) {
+                    return driverContext.blockFactory().newConstantNullBlock(page.getPositionCount());
+                }
 
-        @Override
-        public String toString() {
-            return CONSTANT_NULL.toString();
-        }
-    };
+                @Override
+                public void close() {
 
-    public static final ExpressionEvaluator CONSTANT_NULL = new ExpressionEvaluator() {
-        @Override
-        public Block eval(Page page) {
-            return Block.constantNullBlock(page.getPositionCount());
+                }
+            };
         }
 
         @Override
         public String toString() {
             return "ConstantNull";
         }
-
-        @Override
-        public void close() {}
     };
 }

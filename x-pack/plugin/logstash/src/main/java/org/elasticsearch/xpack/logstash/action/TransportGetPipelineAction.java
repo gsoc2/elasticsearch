@@ -21,12 +21,12 @@ import org.elasticsearch.action.support.HandledTransportAction;
 import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.client.internal.OriginSettingClient;
 import org.elasticsearch.common.bytes.BytesReference;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.Maps;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.index.IndexNotFoundException;
 import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.search.SearchHit;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.tasks.Task;
@@ -186,17 +186,16 @@ public class TransportGetPipelineAction extends HandledTransportAction<GetPipeli
             client.prepareSearchScroll(searchResponse.getScrollId())
                 .setScroll(TimeValue.timeValueMinutes(1L))
                 .execute(
-                    ActionListener.wrap(
-                        searchResponse1 -> handleFilteringSearchResponse(
+                    listener.delegateFailureAndWrap(
+                        (delegate, searchResponse1) -> handleFilteringSearchResponse(
                             searchResponse1,
                             pipelineSources,
                             explicitPipelineIds,
                             wildcardPipelinePatterns,
                             numberOfHitsSeenSoFar,
                             clearScroll,
-                            listener
-                        ),
-                        listener::onFailure
+                            delegate
+                        )
                     )
                 );
         }

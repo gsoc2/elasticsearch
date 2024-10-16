@@ -1,22 +1,21 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.search;
 
-import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.TransportVersion;
+import org.elasticsearch.TransportVersions;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
-import org.elasticsearch.common.io.stream.InputStreamStreamInput;
 import org.elasticsearch.common.io.stream.NamedWriteableAwareStreamInput;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
-import org.elasticsearch.common.io.stream.OutputStreamStreamOutput;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.util.Maps;
@@ -27,15 +26,12 @@ import org.elasticsearch.search.internal.AliasFilter;
 import org.elasticsearch.search.internal.ShardSearchContextId;
 import org.elasticsearch.transport.RemoteClusterAware;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 public final class SearchContextId {
@@ -61,39 +57,43 @@ public final class SearchContextId {
         return contextIds.contains(contextId);
     }
 
-    public static String encode(
+    public static BytesReference encode(
         List<SearchPhaseResult> searchPhaseResults,
         Map<String, AliasFilter> aliasFilter,
-        TransportVersion version
+        TransportVersion version,
+        ShardSearchFailure[] shardFailures
     ) {
-        final BytesReference bytesReference;
-        try (var encodedStreamOutput = new BytesStreamOutput()) {
-            try (var out = new OutputStreamStreamOutput(Base64.getUrlEncoder().wrap(encodedStreamOutput))) {
-                out.setTransportVersion(version);
-                TransportVersion.writeVersion(version, out);
-                out.writeCollection(searchPhaseResults, SearchContextId::writeSearchPhaseResult);
-                out.writeMap(aliasFilter, StreamOutput::writeWriteable);
+        assert shardFailures.length == 0 || version.onOrAfter(TransportVersions.ALLOW_PARTIAL_SEARCH_RESULTS_IN_PIT)
+            : "[allow_partial_search_results] cannot be enabled on a cluster that has not been fully upgraded to version ["
+                + TransportVersions.ALLOW_PARTIAL_SEARCH_RESULTS_IN_PIT
+                + "] or higher.";
+        try (var out = new BytesStreamOutput()) {
+            out.setTransportVersion(version);
+            TransportVersion.writeVersion(version, out);
+            boolean allowNullContextId = out.getTransportVersion().onOrAfter(TransportVersions.ALLOW_PARTIAL_SEARCH_RESULTS_IN_PIT);
+            int shardSize = searchPhaseResults.size() + (allowNullContextId ? shardFailures.length : 0);
+            out.writeVInt(shardSize);
+            for (var searchResult : searchPhaseResults) {
+                final SearchShardTarget target = searchResult.getSearchShardTarget();
+                target.getShardId().writeTo(out);
+                new SearchContextIdForNode(target.getClusterAlias(), target.getNodeId(), searchResult.getContextId()).writeTo(out);
             }
-            bytesReference = encodedStreamOutput.bytes();
+            if (allowNullContextId) {
+                for (var failure : shardFailures) {
+                    failure.shard().getShardId().writeTo(out);
+                    new SearchContextIdForNode(failure.shard().getClusterAlias(), null, null).writeTo(out);
+                }
+            }
+            out.writeMap(aliasFilter, StreamOutput::writeWriteable);
+            return out.bytes();
         } catch (IOException e) {
             assert false : e;
             throw new IllegalArgumentException(e);
         }
-        final BytesRef bytesRef = bytesReference.toBytesRef();
-        return new String(bytesRef.bytes, bytesRef.offset, bytesRef.length, StandardCharsets.ISO_8859_1);
     }
 
-    private static void writeSearchPhaseResult(StreamOutput out, SearchPhaseResult searchPhaseResult) throws IOException {
-        final SearchShardTarget target = searchPhaseResult.getSearchShardTarget();
-        target.getShardId().writeTo(out);
-        new SearchContextIdForNode(target.getClusterAlias(), target.getNodeId(), searchPhaseResult.getContextId()).writeTo(out);
-    }
-
-    public static SearchContextId decode(NamedWriteableRegistry namedWriteableRegistry, String id) {
-        try (
-            var decodedInputStream = Base64.getUrlDecoder().wrap(new ByteArrayInputStream(id.getBytes(StandardCharsets.ISO_8859_1)));
-            var in = new NamedWriteableAwareStreamInput(new InputStreamStreamInput(decodedInputStream), namedWriteableRegistry)
-        ) {
+    public static SearchContextId decode(NamedWriteableRegistry namedWriteableRegistry, BytesReference id) {
+        try (var in = new NamedWriteableAwareStreamInput(id.streamInput(), namedWriteableRegistry)) {
             final TransportVersion version = TransportVersion.readVersion(in);
             in.setTransportVersion(version);
             final Map<ShardId, SearchContextIdForNode> shards = Collections.unmodifiableMap(
@@ -110,12 +110,27 @@ public final class SearchContextId {
         }
     }
 
+    public static String[] decodeIndices(BytesReference id) {
+        try (var in = id.streamInput()) {
+            final TransportVersion version = TransportVersion.readVersion(in);
+            in.setTransportVersion(version);
+            final Map<ShardId, SearchContextIdForNode> shards = Collections.unmodifiableMap(
+                in.readCollection(Maps::newHashMapWithExpectedSize, SearchContextId::readShardsMapEntry)
+            );
+            return new SearchContextId(shards, Collections.emptyMap()).getActualIndices();
+        } catch (IOException e) {
+            assert false : e;
+            throw new IllegalArgumentException(e);
+        }
+    }
+
     private static void readShardsMapEntry(StreamInput in, Map<ShardId, SearchContextIdForNode> shards) throws IOException {
         shards.put(new ShardId(in), new SearchContextIdForNode(in));
     }
 
     public String[] getActualIndices() {
-        final Set<String> indices = new HashSet<>();
+        // ensure that the order is consistent
+        final Set<String> indices = new TreeSet<>();
         for (Map.Entry<ShardId, SearchContextIdForNode> entry : shards().entrySet()) {
             final String indexName = entry.getKey().getIndexName();
             final String clusterAlias = entry.getValue().getClusterAlias();

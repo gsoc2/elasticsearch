@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.admin.cluster.settings;
@@ -61,14 +62,15 @@ public class ClusterUpdateSettingsRequestTests extends ESTestCase {
                     () -> randomAlphaOfLengthBetween(3, 10)
                 )
             );
-            XContentParseException iae = expectThrows(
-                XContentParseException.class,
-                () -> ClusterUpdateSettingsRequest.fromXContent(createParser(xContentType.xContent(), mutated))
-            );
+            XContentParseException iae = expectThrows(XContentParseException.class, () -> {
+                try (var parser = createParser(xContentType.xContent(), mutated)) {
+                    ClusterUpdateSettingsRequest.fromXContent(ClusterUpdateSettingsRequestTests::newTestRequest, parser);
+                }
+            });
             assertThat(iae.getMessage(), containsString("[cluster_update_settings_request] unknown field [" + unsupportedField + "]"));
         } else {
             try (XContentParser parser = createParser(xContentType.xContent(), originalBytes)) {
-                ClusterUpdateSettingsRequest parsedRequest = ClusterUpdateSettingsRequest.fromXContent(parser);
+                var parsedRequest = ClusterUpdateSettingsRequest.fromXContent(ClusterUpdateSettingsRequestTests::newTestRequest, parser);
 
                 assertNull(parser.nextToken());
                 assertThat(parsedRequest.transientSettings(), equalTo(request.transientSettings()));
@@ -78,7 +80,7 @@ public class ClusterUpdateSettingsRequestTests extends ESTestCase {
     }
 
     private static ClusterUpdateSettingsRequest createTestItem() {
-        ClusterUpdateSettingsRequest request = new ClusterUpdateSettingsRequest();
+        ClusterUpdateSettingsRequest request = new ClusterUpdateSettingsRequest(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT);
         request.persistentSettings(ClusterUpdateSettingsResponseTests.randomClusterSettings(0, 2));
         request.transientSettings(ClusterUpdateSettingsResponseTests.randomClusterSettings(0, 2));
         return request;
@@ -118,11 +120,15 @@ public class ClusterUpdateSettingsRequestTests extends ESTestCase {
             }""";
 
         try (XContentParser parser = createParser(XContentType.JSON.xContent(), oneSettingJSON)) {
-            ClusterUpdateSettingsRequest parsedRequest = ClusterUpdateSettingsRequest.fromXContent(parser);
+            var parsedRequest = ClusterUpdateSettingsRequest.fromXContent(ClusterUpdateSettingsRequestTests::newTestRequest, parser);
             assertThat(
                 action.modifiedKeys(parsedRequest),
                 containsInAnyOrder("indices.recovery.max_bytes_per_sec", "cluster.remote.cluster_one.seeds")
             );
         }
+    }
+
+    public static ClusterUpdateSettingsRequest newTestRequest() {
+        return new ClusterUpdateSettingsRequest(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT);
     }
 }

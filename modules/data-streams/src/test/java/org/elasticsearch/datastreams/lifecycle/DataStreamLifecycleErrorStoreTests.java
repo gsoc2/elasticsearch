@@ -1,18 +1,22 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.datastreams.lifecycle;
 
 import org.elasticsearch.action.datastreams.lifecycle.ErrorEntry;
+import org.elasticsearch.health.node.DslErrorInfo;
 import org.elasticsearch.test.ESTestCase;
 import org.junit.Before;
 
+import java.util.List;
 import java.util.Set;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.elasticsearch.datastreams.lifecycle.DataStreamLifecycleErrorStore.MAX_ERROR_MESSAGE_LENGTH;
@@ -83,5 +87,33 @@ public class DataStreamLifecycleErrorStoreTests extends ESTestCase {
         errorStore.recordError("test", exceptionWithLongMessage);
         assertThat(errorStore.getError("test"), is(notNullValue()));
         assertThat(errorStore.getError("test").error().length(), is(MAX_ERROR_MESSAGE_LENGTH));
+    }
+
+    public void testGetFilteredEntries() {
+        IntStream.range(0, 20).forEach(i -> errorStore.recordError("test20", new NullPointerException("testing")));
+        IntStream.range(0, 5).forEach(i -> errorStore.recordError("test5", new NullPointerException("testing")));
+
+        {
+            List<DslErrorInfo> entries = errorStore.getErrorsInfo(entry -> entry.retryCount() > 7, 100);
+            assertThat(entries.size(), is(1));
+            assertThat(entries.get(0).indexName(), is("test20"));
+        }
+
+        {
+            List<DslErrorInfo> entries = errorStore.getErrorsInfo(entry -> entry.retryCount() > 7, 0);
+            assertThat(entries.size(), is(0));
+        }
+
+        {
+            List<DslErrorInfo> entries = errorStore.getErrorsInfo(entry -> entry.retryCount() > 50, 100);
+            assertThat(entries.size(), is(0));
+        }
+
+        {
+            List<DslErrorInfo> entries = errorStore.getErrorsInfo(entry -> entry.retryCount() > 2, 100);
+            assertThat(entries.size(), is(2));
+            assertThat(entries.get(0).indexName(), is("test20"));
+            assertThat(entries.get(1).indexName(), is("test5"));
+        }
     }
 }

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.store;
@@ -33,7 +34,7 @@ public class StoreStats implements Writeable, ToXContentFragment {
 
     private long sizeInBytes;
     private long totalDataSetSizeInBytes;
-    private long reservedSize;
+    private long reservedSizeInBytes;
 
     public StoreStats() {
 
@@ -47,9 +48,9 @@ public class StoreStats implements Writeable, ToXContentFragment {
             totalDataSetSizeInBytes = sizeInBytes;
         }
         if (in.getTransportVersion().onOrAfter(RESERVED_BYTES_VERSION)) {
-            reservedSize = in.readZLong();
+            reservedSizeInBytes = in.readZLong();
         } else {
-            reservedSize = UNKNOWN_RESERVED_BYTES;
+            reservedSizeInBytes = UNKNOWN_RESERVED_BYTES;
         }
     }
 
@@ -63,7 +64,7 @@ public class StoreStats implements Writeable, ToXContentFragment {
         assert reservedSize == UNKNOWN_RESERVED_BYTES || reservedSize >= 0 : reservedSize;
         this.sizeInBytes = sizeInBytes;
         this.totalDataSetSizeInBytes = totalDataSetSizeInBytes;
-        this.reservedSize = reservedSize;
+        this.reservedSizeInBytes = reservedSize;
     }
 
     public void add(StoreStats stats) {
@@ -72,7 +73,7 @@ public class StoreStats implements Writeable, ToXContentFragment {
         }
         sizeInBytes += stats.sizeInBytes;
         totalDataSetSizeInBytes += stats.totalDataSetSizeInBytes;
-        reservedSize = ignoreIfUnknown(reservedSize) + ignoreIfUnknown(stats.reservedSize);
+        reservedSizeInBytes = ignoreIfUnknown(reservedSizeInBytes) + ignoreIfUnknown(stats.reservedSizeInBytes);
     }
 
     private static long ignoreIfUnknown(long reservedSize) {
@@ -83,28 +84,20 @@ public class StoreStats implements Writeable, ToXContentFragment {
         return sizeInBytes;
     }
 
-    public long getSizeInBytes() {
-        return sizeInBytes;
-    }
-
     public ByteSizeValue size() {
         return ByteSizeValue.ofBytes(sizeInBytes);
     }
 
-    public ByteSizeValue getSize() {
-        return size();
+    public long totalDataSetSizeInBytes() {
+        return totalDataSetSizeInBytes;
     }
 
     public ByteSizeValue totalDataSetSize() {
         return ByteSizeValue.ofBytes(totalDataSetSizeInBytes);
     }
 
-    public ByteSizeValue getTotalDataSetSize() {
-        return totalDataSetSize();
-    }
-
-    public long totalDataSetSizeInBytes() {
-        return totalDataSetSizeInBytes;
+    public long reservedSizeInBytes() {
+        return reservedSizeInBytes;
     }
 
     /**
@@ -113,7 +106,7 @@ public class StoreStats implements Writeable, ToXContentFragment {
      * the reserved size is unknown.
      */
     public ByteSizeValue getReservedSize() {
-        return ByteSizeValue.ofBytes(reservedSize);
+        return ByteSizeValue.ofBytes(reservedSizeInBytes);
     }
 
     @Override
@@ -123,7 +116,7 @@ public class StoreStats implements Writeable, ToXContentFragment {
             out.writeVLong(totalDataSetSizeInBytes);
         }
         if (out.getTransportVersion().onOrAfter(RESERVED_BYTES_VERSION)) {
-            out.writeZLong(reservedSize);
+            out.writeZLong(reservedSizeInBytes);
         }
     }
 
@@ -144,12 +137,12 @@ public class StoreStats implements Writeable, ToXContentFragment {
         StoreStats that = (StoreStats) o;
         return sizeInBytes == that.sizeInBytes
             && totalDataSetSizeInBytes == that.totalDataSetSizeInBytes
-            && reservedSize == that.reservedSize;
+            && reservedSizeInBytes == that.reservedSizeInBytes;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(sizeInBytes, totalDataSetSizeInBytes, reservedSize);
+        return Objects.hash(sizeInBytes, totalDataSetSizeInBytes, reservedSizeInBytes);
     }
 
     static final class Fields {

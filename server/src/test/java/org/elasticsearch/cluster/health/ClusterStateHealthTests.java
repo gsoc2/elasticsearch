@@ -1,14 +1,14 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.cluster.health;
 
 import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.admin.cluster.health.ClusterHealthAction;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthRequest;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.action.admin.cluster.health.TransportClusterHealthAction;
@@ -159,8 +159,8 @@ public class ClusterStateHealthTests extends ESTestCase {
         PlainActionFuture<ClusterHealthResponse> listener = new PlainActionFuture<>();
         ActionTestUtils.execute(
             action,
-            new CancellableTask(1, "direct", ClusterHealthAction.NAME, "", TaskId.EMPTY_TASK_ID, Map.of()),
-            new ClusterHealthRequest().waitForGreenStatus(),
+            new CancellableTask(1, "direct", TransportClusterHealthAction.NAME, "", TaskId.EMPTY_TASK_ID, Map.of()),
+            new ClusterHealthRequest(TEST_REQUEST_TIMEOUT).waitForGreenStatus(),
             listener
         );
 
@@ -560,10 +560,10 @@ public class ClusterStateHealthTests extends ESTestCase {
                     && primaryShard.recoverySource().getType() == RecoverySource.Type.EXISTING_STORE) {
                     return false;
                 }
-                if (primaryShard.unassignedInfo().getNumFailedAllocations() > 0) {
+                if (primaryShard.unassignedInfo().failedAllocations() > 0) {
                     return false;
                 }
-                if (primaryShard.unassignedInfo().getLastAllocationStatus() == UnassignedInfo.AllocationStatus.DECIDERS_NO) {
+                if (primaryShard.unassignedInfo().lastAllocationStatus() == UnassignedInfo.AllocationStatus.DECIDERS_NO) {
                     return false;
                 }
             }
@@ -578,6 +578,7 @@ public class ClusterStateHealthTests extends ESTestCase {
         assertThat(clusterStateHealth.getInitializingShards(), equalTo(counter.initializing));
         assertThat(clusterStateHealth.getRelocatingShards(), equalTo(counter.relocating));
         assertThat(clusterStateHealth.getUnassignedShards(), equalTo(counter.unassigned));
+        assertThat(clusterStateHealth.getUnassignedPrimaryShards(), equalTo(counter.unassignedPrimary));
         assertThat(clusterStateHealth.getActiveShardsPercent(), is(allOf(greaterThanOrEqualTo(0.0), lessThanOrEqualTo(100.0))));
     }
 }

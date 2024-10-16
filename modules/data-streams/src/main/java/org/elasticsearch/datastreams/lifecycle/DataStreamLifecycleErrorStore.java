@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.datastreams.lifecycle;
@@ -12,11 +13,16 @@ import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.datastreams.lifecycle.ErrorEntry;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.core.Nullable;
+import org.elasticsearch.health.node.DslErrorInfo;
 
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.function.LongSupplier;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.elasticsearch.xcontent.ToXContent.EMPTY_PARAMS;
 
@@ -89,5 +95,30 @@ public class DataStreamLifecycleErrorStore {
      */
     public Set<String> getAllIndices() {
         return Set.copyOf(indexNameToError.keySet());
+    }
+
+    /**
+     * Retrieve the error entries in the error store that satisfy the provided predicate.
+     * This will return the error entries information (a subset of all the fields an {@link ErrorEntry} holds) sorted by the number of
+     * retries DSL attempted (descending order) and the number of entries will be limited according to the provided limit parameter.
+     * Returns empty list if no entries are present in the error store or none satisfy the predicate.
+     */
+    public List<DslErrorInfo> getErrorsInfo(Predicate<ErrorEntry> errorEntryPredicate, int limit) {
+        if (indexNameToError.isEmpty()) {
+            return List.of();
+        }
+        return indexNameToError.entrySet()
+            .stream()
+            .filter(keyValue -> errorEntryPredicate.test(keyValue.getValue()))
+            .sorted(Map.Entry.comparingByValue())
+            .limit(limit)
+            .map(
+                keyValue -> new DslErrorInfo(
+                    keyValue.getKey(),
+                    keyValue.getValue().firstOccurrenceTimestamp(),
+                    keyValue.getValue().retryCount()
+                )
+            )
+            .collect(Collectors.toList());
     }
 }

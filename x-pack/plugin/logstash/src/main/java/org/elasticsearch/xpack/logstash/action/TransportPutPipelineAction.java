@@ -13,8 +13,8 @@ import org.elasticsearch.action.support.HandledTransportAction;
 import org.elasticsearch.action.support.WriteRequest;
 import org.elasticsearch.client.internal.Client;
 import org.elasticsearch.client.internal.OriginSettingClient;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.logstash.Logstash;
@@ -37,11 +37,6 @@ public class TransportPutPipelineAction extends HandledTransportAction<PutPipeli
             .setId(request.id())
             .setSource(request.source(), request.xContentType())
             .setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE)
-            .execute(
-                ActionListener.wrap(
-                    indexResponse -> listener.onResponse(new PutPipelineResponse(indexResponse.status())),
-                    listener::onFailure
-                )
-            );
+            .execute(listener.delegateFailureAndWrap((l, indexResponse) -> l.onResponse(new PutPipelineResponse(indexResponse.status()))));
     }
 }

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 package org.elasticsearch.indexing;
 
@@ -260,7 +261,7 @@ public class IndexActionIT extends ESIntegTestCase {
     }
 
     public void testDocumentWithBlankFieldName() {
-        Exception e = expectThrows(DocumentParsingException.class, () -> prepareIndex("test").setId("1").setSource("", "value1_2").get());
+        Exception e = expectThrows(DocumentParsingException.class, prepareIndex("test").setId("1").setSource("", "value1_2"));
         assertThat(e.getMessage(), containsString("failed to parse"));
         assertThat(e.getCause().getMessage(), containsString("field name cannot be an empty string"));
     }

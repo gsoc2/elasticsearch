@@ -8,7 +8,6 @@ package org.elasticsearch.xpack.ml.action;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.ElasticsearchStatusException;
 import org.elasticsearch.ResourceNotFoundException;
 import org.elasticsearch.action.ActionListener;
@@ -21,11 +20,11 @@ import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.service.ClusterService;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.util.concurrent.AbstractRunnable;
 import org.elasticsearch.common.util.concurrent.AtomicArray;
 import org.elasticsearch.common.util.concurrent.EsExecutors;
 import org.elasticsearch.discovery.MasterNotDiscoveredException;
+import org.elasticsearch.injection.guice.Inject;
 import org.elasticsearch.persistent.PersistentTasksCustomMetadata;
 import org.elasticsearch.persistent.PersistentTasksService;
 import org.elasticsearch.tasks.CancellableTask;
@@ -57,6 +56,8 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import static org.elasticsearch.xpack.ml.utils.ExceptionCollectionHandling.exceptionArrayToStatusException;
 
 /**
  * Stops the persistent task for running data frame analytics.
@@ -90,7 +91,6 @@ public class TransportStopDataFrameAnalyticsAction extends TransportTasksAction<
             transportService,
             actionFilters,
             StopDataFrameAnalyticsAction.Request::new,
-            StopDataFrameAnalyticsAction.Response::new,
             StopDataFrameAnalyticsAction.Response::new,
             EsExecutors.DIRECT_EXECUTOR_SERVICE
         );
@@ -259,23 +259,27 @@ public class TransportStopDataFrameAnalyticsAction extends TransportTasksAction<
         for (String analyticsId : nonStoppedAnalytics) {
             PersistentTasksCustomMetadata.PersistentTask<?> analyticsTask = MlTasks.getDataFrameAnalyticsTask(analyticsId, tasks);
             if (analyticsTask != null) {
-                persistentTasksService.sendRemoveRequest(analyticsTask.getId(), ActionListener.wrap(removedTask -> {
-                    auditor.info(analyticsId, Messages.DATA_FRAME_ANALYTICS_AUDIT_FORCE_STOPPED);
-                    if (counter.incrementAndGet() == nonStoppedAnalytics.size()) {
-                        sendResponseOrFailure(request.getId(), listener, failures);
-                    }
-                }, e -> {
-                    final int slot = counter.incrementAndGet();
-                    // We validated that the analytics ids supplied in the request existed when we started processing the action.
-                    // If the related tasks don't exist at this point then they must have been stopped by a simultaneous stop request.
-                    // This is not an error.
-                    if (ExceptionsHelper.unwrapCause(e) instanceof ResourceNotFoundException == false) {
-                        failures.set(slot - 1, e);
-                    }
-                    if (slot == nonStoppedAnalytics.size()) {
-                        sendResponseOrFailure(request.getId(), listener, failures);
-                    }
-                }));
+                persistentTasksService.sendRemoveRequest(
+                    analyticsTask.getId(),
+                    MachineLearning.HARD_CODED_MACHINE_LEARNING_MASTER_NODE_TIMEOUT,
+                    ActionListener.wrap(removedTask -> {
+                        auditor.info(analyticsId, Messages.DATA_FRAME_ANALYTICS_AUDIT_FORCE_STOPPED);
+                        if (counter.incrementAndGet() == nonStoppedAnalytics.size()) {
+                            sendResponseOrFailure(request.getId(), listener, failures);
+                        }
+                    }, e -> {
+                        final int slot = counter.incrementAndGet();
+                        // We validated that the analytics ids supplied in the request existed when we started processing the action.
+                        // If the related tasks don't exist at this point then they must have been stopped by a simultaneous stop request.
+                        // This is not an error.
+                        if (ExceptionsHelper.unwrapCause(e) instanceof ResourceNotFoundException == false) {
+                            failures.set(slot - 1, e);
+                        }
+                        if (slot == nonStoppedAnalytics.size()) {
+                            sendResponseOrFailure(request.getId(), listener, failures);
+                        }
+                    })
+                );
             } else {
                 // This should not happen, because nonStoppedAnalytics
                 // were derived from the same tasks that were passed to this method
@@ -297,7 +301,7 @@ public class TransportStopDataFrameAnalyticsAction extends TransportTasksAction<
         AtomicArray<Exception> failures
     ) {
         List<Exception> caughtExceptions = failures.asList();
-        if (caughtExceptions.size() == 0) {
+        if (caughtExceptions.isEmpty()) {
             listener.onResponse(new StopDataFrameAnalyticsAction.Response(true));
             return;
         }
@@ -306,11 +310,11 @@ public class TransportStopDataFrameAnalyticsAction extends TransportTasksAction<
             + analyticsId
             + "] with ["
             + caughtExceptions.size()
-            + "] failures, rethrowing last, all Exceptions: ["
+            + "] failures, rethrowing first. All Exceptions: ["
             + caughtExceptions.stream().map(Exception::getMessage).collect(Collectors.joining(", "))
             + "]";
 
-        ElasticsearchException e = new ElasticsearchException(msg, caughtExceptions.get(0));
+        ElasticsearchStatusException e = exceptionArrayToStatusException(failures, msg);
         listener.onFailure(e);
     }
 
@@ -328,7 +332,11 @@ public class TransportStopDataFrameAnalyticsAction extends TransportTasksAction<
                 // This means the task has not been assigned to a node yet so
                 // we can stop it by removing its persistent task.
                 // The listener is a no-op as we're already going to wait for the task to be removed.
-                persistentTasksService.sendRemoveRequest(task.getId(), ActionListener.noop());
+                persistentTasksService.sendRemoveRequest(
+                    task.getId(),
+                    MachineLearning.HARD_CODED_MACHINE_LEARNING_MASTER_NODE_TIMEOUT,
+                    ActionListener.noop()
+                );
             }
         }
         return nodes.toArray(new String[0]);

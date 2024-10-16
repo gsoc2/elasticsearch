@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.action.admin.indices.shards;
@@ -46,6 +47,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.stream.Collectors;
 
@@ -63,13 +65,12 @@ public class TransportIndicesShardStoresActionTests extends ESTestCase {
                 request.shardStatuses("green", "red"); // newly-created shards are in yellow health so this matches none of them
                 final var future = new PlainActionFuture<IndicesShardStoresResponse>();
                 action.execute(
-                    new CancellableTask(1, "transport", IndicesShardStoresAction.NAME, "", TaskId.EMPTY_TASK_ID, Map.of()),
+                    new CancellableTask(1, "transport", TransportIndicesShardStoresAction.TYPE.name(), "", TaskId.EMPTY_TASK_ID, Map.of()),
                     request,
                     future
                 );
-                assertTrue(future.isDone());
 
-                final var response = future.actionGet(0L);
+                final var response = safeGet(future);
                 assertThat(response.getFailures(), empty());
                 assertThat(response.getStoreStatuses(), anEmptyMap());
                 assertThat(shardsWithFailures, empty());
@@ -86,7 +87,7 @@ public class TransportIndicesShardStoresActionTests extends ESTestCase {
                 request.shardStatuses(randomFrom("yellow", "all")); // newly-created shards are in yellow health so this matches all of them
                 final var future = new PlainActionFuture<IndicesShardStoresResponse>();
                 action.execute(
-                    new CancellableTask(1, "transport", IndicesShardStoresAction.NAME, "", TaskId.EMPTY_TASK_ID, Map.of()),
+                    new CancellableTask(1, "transport", TransportIndicesShardStoresAction.TYPE.name(), "", TaskId.EMPTY_TASK_ID, Map.of()),
                     request,
                     future
                 );
@@ -123,7 +124,14 @@ public class TransportIndicesShardStoresActionTests extends ESTestCase {
         runTest(new TestHarness() {
             @Override
             void runTest() {
-                final var task = new CancellableTask(1, "transport", IndicesShardStoresAction.NAME, "", TaskId.EMPTY_TASK_ID, Map.of());
+                final var task = new CancellableTask(
+                    1,
+                    "transport",
+                    TransportIndicesShardStoresAction.TYPE.name(),
+                    "",
+                    TaskId.EMPTY_TASK_ID,
+                    Map.of()
+                );
                 final var request = new IndicesShardStoresRequest();
                 request.shardStatuses(randomFrom("yellow", "all"));
                 final var future = new PlainActionFuture<IndicesShardStoresResponse>();
@@ -132,8 +140,7 @@ public class TransportIndicesShardStoresActionTests extends ESTestCase {
                 listExpected = false;
                 assertFalse(future.isDone());
                 deterministicTaskQueue.runAllTasks();
-                assertTrue(future.isDone());
-                expectThrows(TaskCancelledException.class, () -> future.actionGet(0L));
+                expectThrows(ExecutionException.class, TaskCancelledException.class, future::result);
             }
         });
     }
@@ -146,16 +153,18 @@ public class TransportIndicesShardStoresActionTests extends ESTestCase {
                 request.shardStatuses(randomFrom("yellow", "all"));
                 final var future = new PlainActionFuture<IndicesShardStoresResponse>();
                 action.execute(
-                    new CancellableTask(1, "transport", IndicesShardStoresAction.NAME, "", TaskId.EMPTY_TASK_ID, Map.of()),
+                    new CancellableTask(1, "transport", TransportIndicesShardStoresAction.TYPE.name(), "", TaskId.EMPTY_TASK_ID, Map.of()),
                     request,
                     future
                 );
                 assertFalse(future.isDone());
                 failOneRequest = true;
                 deterministicTaskQueue.runAllTasks();
-                assertTrue(future.isDone());
                 assertFalse(failOneRequest);
-                assertEquals("simulated", expectThrows(ElasticsearchException.class, () -> future.actionGet(0L)).getMessage());
+                assertEquals(
+                    "simulated",
+                    expectThrows(ExecutionException.class, ElasticsearchException.class, future::result).getMessage()
+                );
             }
         });
     }

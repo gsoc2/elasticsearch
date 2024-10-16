@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.http;
@@ -21,12 +22,11 @@ import org.elasticsearch.core.Nullable;
 import org.elasticsearch.core.Releasable;
 import org.elasticsearch.core.Releasables;
 import org.elasticsearch.rest.AbstractRestChannel;
-import org.elasticsearch.rest.ChunkedRestResponseBody;
-import org.elasticsearch.rest.LoggingChunkedRestResponseBody;
+import org.elasticsearch.rest.ChunkedRestResponseBodyPart;
+import org.elasticsearch.rest.LoggingChunkedRestResponseBodyPart;
 import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.rest.RestStatus;
-import org.elasticsearch.telemetry.tracing.SpanId;
 import org.elasticsearch.telemetry.tracing.Tracer;
 
 import java.util.ArrayList;
@@ -91,13 +91,12 @@ public class DefaultRestChannel extends AbstractRestChannel {
         // We're sending a response so we know we won't be needing the request content again and release it
         httpRequest.release();
 
-        final SpanId spanId = SpanId.forRestRequest(request);
-
         final ArrayList<Releasable> toClose = new ArrayList<>(4);
         if (HttpUtils.shouldCloseConnection(httpRequest)) {
             toClose.add(() -> CloseableChannel.closeChannel(httpChannel));
         }
         toClose.add(() -> tracer.stopTrace(request));
+        toClose.add(restResponse);
 
         boolean success = false;
         String opaque = null;
@@ -115,8 +114,7 @@ public class DefaultRestChannel extends AbstractRestChannel {
         try {
             final HttpResponse httpResponse;
             if (isHeadRequest == false && restResponse.isChunked()) {
-                ChunkedRestResponseBody chunkedContent = restResponse.chunkedContent();
-                toClose.add(chunkedContent);
+                ChunkedRestResponseBodyPart chunkedContent = restResponse.chunkedContent();
                 if (httpLogger != null && httpLogger.isBodyTracerEnabled()) {
                     final var loggerStream = httpLogger.openResponseBodyLoggingStream(request.getRequestId());
                     toClose.add(() -> {
@@ -126,7 +124,7 @@ public class DefaultRestChannel extends AbstractRestChannel {
                             assert false : e; // nothing much to go wrong here
                         }
                     });
-                    chunkedContent = new LoggingChunkedRestResponseBody(chunkedContent, loggerStream);
+                    chunkedContent = new LoggingChunkedRestResponseBodyPart(chunkedContent, loggerStream);
                 }
 
                 httpResponse = httpRequest.createResponse(restResponse.status(), chunkedContent);
@@ -134,8 +132,6 @@ public class DefaultRestChannel extends AbstractRestChannel {
                 final BytesReference content = restResponse.content();
                 if (content instanceof Releasable releasable) {
                     toClose.add(releasable);
-                } else if (restResponse.isChunked()) {
-                    toClose.add(restResponse.chunkedContent());
                 }
                 toClose.add(this::releaseOutputBuffer);
 
@@ -174,9 +170,9 @@ public class DefaultRestChannel extends AbstractRestChannel {
 
             addCookies(httpResponse);
 
-            tracer.setAttribute(spanId, "http.status_code", restResponse.status().getStatus());
+            tracer.setAttribute(request, "http.status_code", restResponse.status().getStatus());
             restResponse.getHeaders()
-                .forEach((key, values) -> tracer.setAttribute(spanId, "http.response.headers." + key, String.join("; ", values)));
+                .forEach((key, values) -> tracer.setAttribute(request, "http.response.headers." + key, String.join("; ", values)));
 
             ActionListener<Void> listener = ActionListener.releasing(Releasables.wrap(toClose));
             if (httpLogger != null) {

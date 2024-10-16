@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.index.seqno;
@@ -45,7 +46,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final long retainingSequenceNumber = randomBoolean() ? RETAIN_ALL : randomNonNegativeLong();
         final String source = randomAlphaOfLength(8);
         client().execute(
-            RetentionLeaseActions.Add.INSTANCE,
+            RetentionLeaseActions.ADD,
             new RetentionLeaseActions.AddRequest(indexService.getShard(0).shardId(), id, retainingSequenceNumber, source)
         ).actionGet();
 
@@ -76,7 +77,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final long retainingSequenceNumber = randomBoolean() ? RETAIN_ALL : randomNonNegativeLong();
         final String source = randomAlphaOfLength(8);
         client().execute(
-            RetentionLeaseActions.Add.INSTANCE,
+            RetentionLeaseActions.ADD,
             new RetentionLeaseActions.AddRequest(indexService.getShard(0).shardId(), id, retainingSequenceNumber, source)
         ).actionGet();
 
@@ -87,7 +88,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final RetentionLeaseAlreadyExistsException e = expectThrows(
             RetentionLeaseAlreadyExistsException.class,
             () -> client().execute(
-                RetentionLeaseActions.Add.INSTANCE,
+                RetentionLeaseActions.ADD,
                 new RetentionLeaseActions.AddRequest(indexService.getShard(0).shardId(), id, nextRetainingSequenceNumber, source)
             ).actionGet()
         );
@@ -112,7 +113,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final TimeValue estimatedTimeInterval = ThreadPool.ESTIMATED_TIME_INTERVAL_SETTING.get(node().settings());
 
         client().execute(
-            RetentionLeaseActions.Add.INSTANCE,
+            RetentionLeaseActions.ADD,
             new RetentionLeaseActions.AddRequest(indexService.getShard(0).shardId(), id, retainingSequenceNumber, source)
         ).actionGet();
 
@@ -155,7 +156,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         } while (threadPool.absoluteTimeInMillis() <= timestampUpperBound);
 
         client().execute(
-            RetentionLeaseActions.Renew.INSTANCE,
+            RetentionLeaseActions.RENEW,
             new RetentionLeaseActions.RenewRequest(indexService.getShard(0).shardId(), id, nextRetainingSequenceNumber, source)
         ).actionGet();
 
@@ -193,7 +194,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final RetentionLeaseNotFoundException e = expectThrows(
             RetentionLeaseNotFoundException.class,
             () -> client().execute(
-                RetentionLeaseActions.Renew.INSTANCE,
+                RetentionLeaseActions.RENEW,
                 new RetentionLeaseActions.RenewRequest(indexService.getShard(0).shardId(), id, retainingSequenceNumber, source)
             ).actionGet()
         );
@@ -209,14 +210,12 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final long retainingSequenceNumber = randomBoolean() ? RETAIN_ALL : randomNonNegativeLong();
         final String source = randomAlphaOfLength(8);
         client().execute(
-            RetentionLeaseActions.Add.INSTANCE,
+            RetentionLeaseActions.ADD,
             new RetentionLeaseActions.AddRequest(indexService.getShard(0).shardId(), id, retainingSequenceNumber, source)
         ).actionGet();
 
-        client().execute(
-            RetentionLeaseActions.Remove.INSTANCE,
-            new RetentionLeaseActions.RemoveRequest(indexService.getShard(0).shardId(), id)
-        ).actionGet();
+        client().execute(RetentionLeaseActions.REMOVE, new RetentionLeaseActions.RemoveRequest(indexService.getShard(0).shardId(), id))
+            .actionGet();
 
         final IndicesStatsResponse stats = client().execute(IndicesStatsAction.INSTANCE, new IndicesStatsRequest().indices("index"))
             .actionGet();
@@ -241,7 +240,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final RetentionLeaseNotFoundException e = expectThrows(
             RetentionLeaseNotFoundException.class,
             () -> client().execute(
-                RetentionLeaseActions.Remove.INSTANCE,
+                RetentionLeaseActions.REMOVE,
                 new RetentionLeaseActions.RemoveRequest(indexService.getShard(0).shardId(), id)
             ).actionGet()
         );
@@ -258,7 +257,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         runActionUnderBlockTest(
             indexService,
             (shardId, actionLatch) -> client().execute(
-                RetentionLeaseActions.Add.INSTANCE,
+                RetentionLeaseActions.ADD,
                 new RetentionLeaseActions.AddRequest(shardId, id, retainingSequenceNumber, source),
                 new ActionListener<>() {
 
@@ -310,7 +309,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final TimeValue estimatedTimeInterval = ThreadPool.ESTIMATED_TIME_INTERVAL_SETTING.get(node().settings());
 
         client().execute(
-            RetentionLeaseActions.Add.INSTANCE,
+            RetentionLeaseActions.ADD,
             new RetentionLeaseActions.AddRequest(indexService.getShard(0).shardId(), id, retainingSequenceNumber, source)
         ).actionGet();
 
@@ -355,7 +354,7 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         runActionUnderBlockTest(
             indexService,
             (shardId, actionLatch) -> client().execute(
-                RetentionLeaseActions.Renew.INSTANCE,
+                RetentionLeaseActions.RENEW,
                 new RetentionLeaseActions.RenewRequest(shardId, id, nextRetainingSequenceNumber, source),
                 new ActionListener<>() {
 
@@ -404,14 +403,14 @@ public class RetentionLeaseActionsTests extends ESSingleNodeTestCase {
         final String source = randomAlphaOfLength(8);
 
         client().execute(
-            RetentionLeaseActions.Add.INSTANCE,
+            RetentionLeaseActions.ADD,
             new RetentionLeaseActions.AddRequest(indexService.getShard(0).shardId(), id, retainingSequenceNumber, source)
         ).actionGet();
 
         runActionUnderBlockTest(
             indexService,
             (shardId, actionLatch) -> client().execute(
-                RetentionLeaseActions.Remove.INSTANCE,
+                RetentionLeaseActions.REMOVE,
                 new RetentionLeaseActions.RemoveRequest(shardId, id),
                 new ActionListener<>() {
 

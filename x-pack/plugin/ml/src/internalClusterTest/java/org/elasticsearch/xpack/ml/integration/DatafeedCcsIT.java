@@ -191,7 +191,11 @@ public class DatafeedCcsIT extends AbstractMultiClustersTestCase {
             SearchResponse response = client(LOCAL_CLUSTER).prepareSearch(".ml-notifications*")
                 .setQuery(new MatchPhraseQueryBuilder("message", message))
                 .get();
-            return response.getHits().getTotalHits().value > 0;
+            try {
+                return response.getHits().getTotalHits().value > 0;
+            } finally {
+                response.decRef();
+            }
         } catch (ElasticsearchException e) {
             return false;
         }
@@ -240,7 +244,7 @@ public class DatafeedCcsIT extends AbstractMultiClustersTestCase {
     private void setSkipUnavailable(boolean skip) {
         client(LOCAL_CLUSTER).admin()
             .cluster()
-            .prepareUpdateSettings()
+            .prepareUpdateSettings(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT)
             .setPersistentSettings(Settings.builder().put("cluster.remote." + REMOTE_CLUSTER + ".skip_unavailable", skip).build())
             .get();
     }
@@ -248,7 +252,7 @@ public class DatafeedCcsIT extends AbstractMultiClustersTestCase {
     private void clearSkipUnavailable() {
         client(LOCAL_CLUSTER).admin()
             .cluster()
-            .prepareUpdateSettings()
+            .prepareUpdateSettings(TEST_REQUEST_TIMEOUT, TEST_REQUEST_TIMEOUT)
             .setPersistentSettings(Settings.builder().putNull("cluster.remote." + REMOTE_CLUSTER + ".skip_unavailable").build())
             .get();
     }

@@ -1,9 +1,10 @@
 /*
  * Copyright Elasticsearch B.V. and/or licensed to Elasticsearch B.V. under one
- * or more contributor license agreements. Licensed under the Elastic License
- * 2.0 and the Server Side Public License, v 1; you may not use this file except
- * in compliance with, at your election, the Elastic License 2.0 or the Server
- * Side Public License, v 1.
+ * or more contributor license agreements. Licensed under the "Elastic License
+ * 2.0", the "GNU Affero General Public License v3.0 only", and the "Server Side
+ * Public License v 1"; you may not use this file except in compliance with, at
+ * your election, the "Elastic License 2.0", the "GNU Affero General Public
+ * License v3.0 only", or the "Server Side Public License, v 1".
  */
 
 package org.elasticsearch.migration;
@@ -19,7 +20,7 @@ import org.elasticsearch.action.admin.indices.alias.Alias;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.elasticsearch.action.admin.indices.create.CreateIndexResponse;
 import org.elasticsearch.action.admin.indices.template.put.PutComponentTemplateAction;
-import org.elasticsearch.action.admin.indices.template.put.PutComposableIndexTemplateAction;
+import org.elasticsearch.action.admin.indices.template.put.TransportPutComposableIndexTemplateAction;
 import org.elasticsearch.action.support.ActiveShardCount;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.ClusterStateUpdateTask;
@@ -88,8 +89,8 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
 
         ensureGreen();
 
-        PostFeatureUpgradeRequest migrationRequest = new PostFeatureUpgradeRequest();
-        GetFeatureUpgradeStatusRequest getStatusRequest = new GetFeatureUpgradeStatusRequest();
+        PostFeatureUpgradeRequest migrationRequest = new PostFeatureUpgradeRequest(TEST_REQUEST_TIMEOUT);
+        GetFeatureUpgradeStatusRequest getStatusRequest = new GetFeatureUpgradeStatusRequest(TEST_REQUEST_TIMEOUT);
 
         // Start the migration and *immediately* request the status. We're trying to detect a race condition with this test, so we need to
         // do this as fast as possible, but not before the request to start the migration completes.
@@ -170,7 +171,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
             postUpgradeHookCalled.set(true);
         });
 
-        PostFeatureUpgradeRequest migrationRequest = new PostFeatureUpgradeRequest();
+        PostFeatureUpgradeRequest migrationRequest = new PostFeatureUpgradeRequest(TEST_REQUEST_TIMEOUT);
         PostFeatureUpgradeResponse migrationResponse = client().execute(PostFeatureUpgradeAction.INSTANCE, migrationRequest).get();
         assertThat(migrationResponse.getReason(), nullValue());
         assertThat(migrationResponse.getElasticsearchException(), nullValue());
@@ -180,7 +181,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
             .collect(Collectors.toSet());
         assertThat(migratingFeatures, hasItem(FEATURE_NAME));
 
-        GetFeatureUpgradeStatusRequest getStatusRequest = new GetFeatureUpgradeStatusRequest();
+        GetFeatureUpgradeStatusRequest getStatusRequest = new GetFeatureUpgradeStatusRequest(TEST_REQUEST_TIMEOUT);
         // The feature upgrade may take longer than ten seconds when tests are running
         // in parallel, so we give assertBusy a sixty-second timeout.
         assertBusy(() -> {
@@ -196,7 +197,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
         assertTrue("the pre-migration hook wasn't actually called", preUpgradeHookCalled.get());
         assertTrue("the post-migration hook wasn't actually called", postUpgradeHookCalled.get());
 
-        Metadata finalMetadata = clusterAdmin().prepareState().get().getState().metadata();
+        Metadata finalMetadata = clusterAdmin().prepareState(TEST_REQUEST_TIMEOUT).get().getState().metadata();
         // Check that the results metadata is what we expect.
         FeatureMigrationResults currentResults = finalMetadata.custom(FeatureMigrationResults.TYPE);
         assertThat(currentResults, notNullValue());
@@ -246,12 +247,12 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
         updateIndexSettings(Settings.builder().put("index.blocks.write", true), indexName);
         ensureGreen();
 
-        client().execute(PostFeatureUpgradeAction.INSTANCE, new PostFeatureUpgradeRequest()).get();
+        client().execute(PostFeatureUpgradeAction.INSTANCE, new PostFeatureUpgradeRequest(TEST_REQUEST_TIMEOUT)).get();
 
         assertBusy(() -> {
             GetFeatureUpgradeStatusResponse statusResp = client().execute(
                 GetFeatureUpgradeStatusAction.INSTANCE,
-                new GetFeatureUpgradeStatusRequest()
+                new GetFeatureUpgradeStatusRequest(TEST_REQUEST_TIMEOUT)
             ).get();
             logger.info(Strings.toString(statusResp));
             assertThat(statusResp.getUpgradeStatus(), equalTo(GetFeatureUpgradeStatusResponse.UpgradeStatus.NO_MIGRATION_NEEDED));
@@ -299,7 +300,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
             fail("cluster state update failed, see log for details");
         }
 
-        PostFeatureUpgradeRequest migrationRequest = new PostFeatureUpgradeRequest();
+        PostFeatureUpgradeRequest migrationRequest = new PostFeatureUpgradeRequest(TEST_REQUEST_TIMEOUT);
         PostFeatureUpgradeResponse migrationResponse = client().execute(PostFeatureUpgradeAction.INSTANCE, migrationRequest).get();
         // Make sure we actually started the migration
         assertTrue(
@@ -309,7 +310,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
 
         // Now wait for the migration to finish (otherwise the test infra explodes)
         assertBusy(() -> {
-            GetFeatureUpgradeStatusRequest getStatusRequest = new GetFeatureUpgradeStatusRequest();
+            GetFeatureUpgradeStatusRequest getStatusRequest = new GetFeatureUpgradeStatusRequest(TEST_REQUEST_TIMEOUT);
             GetFeatureUpgradeStatusResponse statusResp = client().execute(GetFeatureUpgradeStatusAction.INSTANCE, getStatusRequest).get();
             logger.info(Strings.toString(statusResp));
             assertThat(statusResp.getUpgradeStatus(), equalTo(GetFeatureUpgradeStatusResponse.UpgradeStatus.NO_MIGRATION_NEEDED));
@@ -337,8 +338,10 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
 
         ensureGreen();
 
-        PostFeatureUpgradeResponse migrationResponse = client().execute(PostFeatureUpgradeAction.INSTANCE, new PostFeatureUpgradeRequest())
-            .get();
+        PostFeatureUpgradeResponse migrationResponse = client().execute(
+            PostFeatureUpgradeAction.INSTANCE,
+            new PostFeatureUpgradeRequest(TEST_REQUEST_TIMEOUT)
+        ).get();
 
         assertTrue(migrationResponse.isAccepted());
     }
@@ -349,7 +352,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
         assertBusy(() -> {
             GetFeatureUpgradeStatusResponse statusResp = client().execute(
                 GetFeatureUpgradeStatusAction.INSTANCE,
-                new GetFeatureUpgradeStatusRequest()
+                new GetFeatureUpgradeStatusRequest(TEST_REQUEST_TIMEOUT)
             ).get();
             logger.info(Strings.toString(statusResp));
             assertThat(statusResp.getUpgradeStatus(), equalTo(GetFeatureUpgradeStatusResponse.UpgradeStatus.ERROR));
@@ -364,7 +367,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
         assertBusy(() -> {
             GetFeatureUpgradeStatusResponse statusResp = client().execute(
                 GetFeatureUpgradeStatusAction.INSTANCE,
-                new GetFeatureUpgradeStatusRequest()
+                new GetFeatureUpgradeStatusRequest(TEST_REQUEST_TIMEOUT)
             ).get();
             logger.info(Strings.toString(statusResp));
             assertThat(statusResp.getUpgradeStatus(), equalTo(GetFeatureUpgradeStatusResponse.UpgradeStatus.NO_MIGRATION_NEEDED));
@@ -419,13 +422,17 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
             .version(5L)
             .metadata(Collections.singletonMap("baz", "thud"))
             .build();
-        client().execute(PutComposableIndexTemplateAction.INSTANCE, new PutComposableIndexTemplateAction.Request("a-it").indexTemplate(cit))
-            .get();
+        client().execute(
+            TransportPutComposableIndexTemplateAction.TYPE,
+            new TransportPutComposableIndexTemplateAction.Request("a-it").indexTemplate(cit)
+        ).get();
 
         ensureGreen();
 
-        PostFeatureUpgradeResponse migrationResponse = client().execute(PostFeatureUpgradeAction.INSTANCE, new PostFeatureUpgradeRequest())
-            .get();
+        PostFeatureUpgradeResponse migrationResponse = client().execute(
+            PostFeatureUpgradeAction.INSTANCE,
+            new PostFeatureUpgradeRequest(TEST_REQUEST_TIMEOUT)
+        ).get();
         assertTrue(migrationResponse.isAccepted());
     }
 
@@ -435,7 +442,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
         assertBusy(() -> {
             GetFeatureUpgradeStatusResponse statusResp = client().execute(
                 GetFeatureUpgradeStatusAction.INSTANCE,
-                new GetFeatureUpgradeStatusRequest()
+                new GetFeatureUpgradeStatusRequest(TEST_REQUEST_TIMEOUT)
             ).get();
             logger.info(Strings.toString(statusResp));
             assertThat(statusResp.getUpgradeStatus(), equalTo(GetFeatureUpgradeStatusResponse.UpgradeStatus.ERROR));
@@ -450,7 +457,7 @@ public class FeatureMigrationIT extends AbstractFeatureMigrationIntegTest {
         assertBusy(() -> {
             GetFeatureUpgradeStatusResponse statusResp = client().execute(
                 GetFeatureUpgradeStatusAction.INSTANCE,
-                new GetFeatureUpgradeStatusRequest()
+                new GetFeatureUpgradeStatusRequest(TEST_REQUEST_TIMEOUT)
             ).get();
             logger.info(Strings.toString(statusResp));
             assertThat(statusResp.getUpgradeStatus(), equalTo(GetFeatureUpgradeStatusResponse.UpgradeStatus.NO_MIGRATION_NEEDED));
